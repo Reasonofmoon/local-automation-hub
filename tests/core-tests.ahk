@@ -57,6 +57,27 @@ palette.SetQuery("window")
 AssertEqual("window.left", palette.VisibleCommandIds()[1], "filters palette")
 palette.SelectIndex(1)
 AssertEqual("ok", palette.ExecuteSelection(), "executes selected command")
+
+keyRouteInvocations := []
+keyRegistry := CommandRegistry()
+keyRegistry.Register("key.one", "Key one", ["key"], "low", TrackPaletteKeyRoute.Bind(keyRouteInvocations, "one"))
+keyRegistry.Register("key.two", "Key two", ["key"], "low", TrackPaletteKeyRoute.Bind(keyRouteInvocations, "two"))
+keyPalette := CommandPalette(keyRegistry, context)
+keyPalette.SetQuery("key")
+keyPalette.isVisible := true
+enterRoutingError := false
+try keyPalette.RouteKeyDown(0x0D, 0, 0x100, true)
+catch
+    enterRoutingError := true
+AssertFalse(enterRoutingError, "accepts Enter with the OnMessage callback signature")
+AssertEqual("one", keyRouteInvocations.Length ? keyRouteInvocations[1] : "", "routes Enter from the OnMessage callback signature")
+numericRoutingError := false
+try keyPalette.RouteKeyDown(0x32, 0, 0x100, true)
+catch
+    numericRoutingError := true
+AssertFalse(numericRoutingError, "accepts numeric keys with the OnMessage callback signature")
+AssertEqual("two", keyRouteInvocations.Length >= 2 ? keyRouteInvocations[2] : "", "routes numeric keys from the OnMessage callback signature")
+
 context.Cancel()
 AssertTrue(context.IsCancelled(), "emergency stop sets cancellation")
 context.ResetCancellation()
@@ -104,4 +125,9 @@ ExitWithTestResult()
 
 ThrowBoom(*) {
     throw Error("boom")
+}
+
+TrackPaletteKeyRoute(invocations, id, *) {
+    invocations.Push(id)
+    return Map("success", false, "error", "test only")
 }

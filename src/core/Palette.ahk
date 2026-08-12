@@ -117,11 +117,18 @@ class CommandPalette {
         }
     }
 
-    HandleKeyDown(wParam, _, hwnd) {
+    HandleKeyDown(wParam, lParam, msg, hwnd) {
         if !this.isVisible || !IsObject(this.gui)
             return
         rootHwnd := DllCall("GetAncestor", "ptr", hwnd, "uint", 2, "ptr")
         if (rootHwnd != this.gui.Hwnd)
+            return
+
+        return this.RouteKeyDown(wParam, lParam, msg, true)
+    }
+
+    RouteKeyDown(wParam, lParam, msg, isPaletteWindow) {
+        if !this.isVisible || !isPaletteWindow || (msg != 0x100)
             return
 
         if (wParam = 0x0D) {
