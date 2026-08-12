@@ -4,6 +4,7 @@
 #Include ..\src\core\CommandRegistry.ahk
 #Include ..\src\core\Config.ahk
 #Include ..\src\core\Logger.ahk
+#Include ..\src\core\Palette.ahk
 
 testConfigPath := A_Temp "\local-automation-hub-core-test.ini"
 try FileDelete(testConfigPath)
@@ -51,6 +52,14 @@ registry.Register("window.left", "Move left", ["window", "layout"], "low", (*) =
 AssertEqual(1, registry.Search("layout").Length, "searches tags")
 AssertThrows(() => registry.Register("window.left", "Duplicate", [], "low", (*) => 0), "rejects duplicate ids")
 AssertEqual("ok", registry.Invoke("window.left", context), "invokes registered command")
+palette := CommandPalette(registry, context)
+palette.SetQuery("window")
+AssertEqual("window.left", palette.VisibleCommandIds()[1], "filters palette")
+palette.SelectIndex(1)
+AssertEqual("ok", palette.ExecuteSelection(), "executes selected command")
+context.Cancel()
+AssertTrue(context.IsCancelled(), "emergency stop sets cancellation")
+context.ResetCancellation()
 registry.Register("window.bad", "Broken", [], "high", ThrowBoom)
 invokeResult := registry.Invoke("window.bad", context)
 AssertTrue(IsObject(invokeResult) && !invokeResult["success"], "isolates handler failure")
