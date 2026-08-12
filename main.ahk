@@ -119,20 +119,36 @@ ConfirmFileOrganizerPreview(preview) {
     return MsgBox(preview, "Local Automation Hub", "YesNo Icon?") = "Yes"
 }
 
-RegisterSystemDiagnostics(registry, context) {
+RegisterSystemDiagnostics(registry, context, presenter := unset) {
+    if !IsSet(presenter)
+        presenter := PresentDiagnosticsReport
+    if !IsObject(presenter) || !HasMethod(presenter, "Call")
+        throw TypeError("Diagnostics presenter must be callable")
     registry.Register(
         "system.diagnostics",
         "System: Diagnostics",
         ["system", "diagnostics", "status", "health"],
         "low",
-        RunSystemDiagnostics.Bind(registry)
+        InvokeSystemDiagnostics.Bind(registry, presenter)
     )
 }
 
-RunSystemDiagnostics(registry, context, *) {
+InvokeSystemDiagnostics(registry, presenter, context, *) {
+    return RunSystemDiagnostics(registry, context, presenter)
+}
+
+RunSystemDiagnostics(registry, context, presenter := unset, *) {
+    if !IsSet(presenter)
+        presenter := PresentDiagnosticsReport
     report := BuildSystemDiagnosticsReport(registry, context)
     context.Notify(report, "info")
+    presenter.Call(report)
     return Map("success", true, "id", "system.diagnostics", "report", report)
+}
+
+PresentDiagnosticsReport(report) {
+    MsgBox(String(report), "Local Automation Hub Diagnostics")
+    return true
 }
 
 BuildSystemDiagnosticsReport(registry, context) {
