@@ -1,0 +1,11 @@
+# Machine-local configuration and secrets
+config/settings.local.ini
+
+# Runtime state and redacted diagnostics
+var/logs/
+var/state/
+
+# AutoHotkey and editor by-products
+*.log
+*.tmp
+*.ahk.bak
