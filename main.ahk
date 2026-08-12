@@ -48,12 +48,12 @@ palette := CommandPalette(registry, context)
 
 RegisterManifestHotkeys()
 
-ShowPalette() {
+ShowPalette(*) {
     global palette
     palette.Show()
 }
 
-CancelAutomation() {
+CancelAutomation(*) {
     global context
     context.Cancel("Emergency stop requested")
 }
