@@ -2,6 +2,21 @@
 #Include TestSupport.ahk
 #Include ..\src\modules\CredentialStore.ahk
 
+nativeWipe := WinCredentialNative()
+ownedBuffer := Buffer(8, 0)
+loop ownedBuffer.Size {
+    NumPut("UChar", A_Index, ownedBuffer, A_Index - 1)
+}
+try {
+    nativeWipe.WipeBlob(ownedBuffer)
+} catch as caught {
+    FileAppend("FAIL: native credential buffer wipe call (" caught.Message ")`n", "*")
+    ExitApp(1)
+}
+loop ownedBuffer.Size {
+    AssertTrue(NumGet(ownedBuffer, A_Index - 1, "UChar") = 0, "native credential buffer byte is wiped")
+}
+
 missingStore := CredentialStore()
 AssertThrows(() => missingStore.Read("LocalAutomationHub/Test/DefinitelyMissing", (*) => 0), "missing generic credential is actionable")
 AssertThrows(() => missingStore.Read("", (*) => 0), "empty target is rejected")

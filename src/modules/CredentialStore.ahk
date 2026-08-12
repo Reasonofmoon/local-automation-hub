@@ -69,8 +69,9 @@ class WinCredentialNative {
     }
 
     WipeBlob(ownedCopy) {
-        if (ownedCopy.Size > 0)
-            DllCall("Kernel32.dll\RtlSecureZeroMemory", "Ptr", ownedCopy.Ptr, "UPtr", ownedCopy.Size, "Ptr")
+        loop ownedCopy.Size {
+            NumPut("UChar", 0, ownedCopy, A_Index - 1)
+        }
     }
 
     FreeCredential(credential) {
