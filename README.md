@@ -61,7 +61,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Manage-Startup.ps1
 
 실제 Kakao 로그인/계정 전환 자동화는 현재 지원하지 않으며 런타임 모듈과 로그인 명령을 등록하지 않습니다. 설치된 Kakao UI에서 안정적인 로그인/password control 신호를 관찰하지 못해 Task 8을 unsupported로 종료했습니다. 근거는 [kakao-ui-capability.md](docs/harness/runs/2026-08-12-local-automation-hub/kakao-ui-capability.md)에서 확인할 수 있습니다.
 
-따라서 Credential Manager target 등록 helper는 존재하지만 실제 Kakao 로그인 UI에 값을 입력하지 않습니다. 최종 수동 Kakao 테스트는 사용자가 직접 UI를 확인하고 명시적으로 진행해야 하며, 자동 검증은 Kakao 창을 열거나 자격 증명을 읽지 않습니다.
+따라서 Credential Manager target 등록 helper는 존재하지만 실제 Kakao 로그인 UI에 값을 입력하지 않습니다. 현재 프로젝트에서 실제 Kakao 로그인 테스트는 `not applicable`입니다. 향후 capability를 다시 검사해 안정적인 password control 신호를 확보하고 별도 구현을 승인한 경우에만 이 기능을 재개할 수 있습니다. 자동 검증은 Kakao 창을 열거나 자격 증명을 읽지 않습니다.
 
 ## 검증
 

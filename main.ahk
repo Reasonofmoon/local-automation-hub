@@ -12,24 +12,41 @@
 #Include src\system\ExplorerSelection.ahk
 #Include src\modules\FileOrganizer.ahk
 
+HOTKEY_MANIFEST := [
+    Map("hotkey", "CapsLock & Space", "handler", ShowPalette),
+    Map("hotkey", "^!Esc", "handler", CancelAutomation)
+]
+
 rootDir := A_ScriptDir
 configPath := FileExist(rootDir "\config\settings.local.ini")
     ? rootDir "\config\settings.local.ini"
     : rootDir "\config\settings.example.ini"
-config := HubConfig.Load(configPath)
 logger := SafeLogger(rootDir)
+configLoadError := ""
+try {
+    config := HubConfig.Load(configPath)
+} catch as caughtError {
+    ; Keep startup safe: no configured module is constructed after a load failure.
+    config := CreateEmptyConfig()
+    configLoadError := SafeLogger.Redact(SafeErrorMessage(caughtError))
+}
 context := AppContext(rootDir, config, logger)
+context.configLoadError := configLoadError
+if (configLoadError != "")
+    context.Notify("Configuration load failed; diagnostics-only mode. " configLoadError, "error")
 validationErrors := HubConfig.Validate(config)
 if (validationErrors.Length > 0)
     context.Notify("Configuration validation failed: " validationErrors.Length " issue(s)", "error")
 registry := CommandRegistry()
-RegisterBuiltInCommands(registry, context)
-snippets := SnippetService(config["Snippets"], Win32InputAdapter(), context)
-RegisterSnippetCommands(registry, snippets)
+RegisterSystemDiagnostics(registry, context)
+if (configLoadError = "") {
+    RegisterBuiltInCommands(registry, context)
+    snippets := SnippetService(config["Snippets"], Win32InputAdapter(), context)
+    RegisterSnippetCommands(registry, snippets)
+}
 palette := CommandPalette(registry, context)
 
-CapsLock & Space::ShowPalette()
-^!Esc::CancelAutomation()
+RegisterManifestHotkeys()
 
 ShowPalette() {
     global palette
@@ -48,8 +65,16 @@ RegisterBuiltInCommands(registry, context) {
     RegisterWindowCommands(registry, windowService)
     fileOrganizer := FileOrganizer(A_ScriptDir "\var\state\file-undo.ini")
     RegisterFileOrganizerCommands(registry, fileOrganizer)
-    RegisterSystemDiagnostics(registry, context)
     return registry
+}
+
+CreateEmptyConfig() {
+    return Map(
+        "General", Map(),
+        "KakaoAccounts", Map(),
+        "Snippets", Map(),
+        "Workspace", Map()
+    )
 }
 
 RegisterFileOrganizerCommands(registry, organizer) {
@@ -106,6 +131,13 @@ BuildSystemDiagnosticsReport(registry, context) {
         ""
     ]
 
+    if (context.configLoadError != "") {
+        lines.Push("Configuration load: failed (diagnostics-only mode)")
+        lines.Push("  - " context.configLoadError)
+    } else {
+        lines.Push("Configuration load: succeeded")
+    }
+
     configErrors := HubConfig.Validate(context.config)
     lines.Push("Configuration errors: " (configErrors.Length = 0 ? "none" : configErrors.Length))
     for _, configError in configErrors
@@ -117,7 +149,7 @@ BuildSystemDiagnosticsReport(registry, context) {
         lines.Push("  - " missing)
 
     duplicateIds := FindDuplicateCommandIds(registry)
-    lines.Push("Duplicate command IDs: " (duplicateIds.Length = 0 ? "none (registry enforces unique IDs)" : duplicateIds.Length))
+    lines.Push("Duplicate command IDs: " (duplicateIds.Length = 0 ? "none (CommandRegistry prevents duplicates at registration)" : duplicateIds.Length))
     for _, duplicateId in duplicateIds
         lines.Push("  - " duplicateId)
 
@@ -179,8 +211,23 @@ IsExecutableAvailable(path) {
         directory := Trim(directory, " `t")
         if (directory = "")
             continue
-        if IsRegularFile(directory "\" path)
+        candidate := directory "\" path
+        if IsRegularFile(candidate)
             return true
+        if !RegExMatch(path, "i)\.[^\\/]+$") {
+            pathext := EnvGet("PATHEXT")
+            if (pathext = "")
+                pathext := ".COM;.EXE;.BAT;.CMD"
+            for _, extension in StrSplit(pathext, ";") {
+                extension := Trim(extension, " `t")
+                if (extension = "")
+                    continue
+                if (SubStr(extension, 1, 1) != ".")
+                    extension := "." extension
+                if IsRegularFile(candidate extension)
+                    return true
+            }
+        }
     }
     return false
 }
@@ -208,16 +255,26 @@ FindDuplicateCommandIds(registry) {
 }
 
 FindDuplicateHotkeys() {
-    configured := ["CapsLock & Space", "^!Esc"]
+    global HOTKEY_MANIFEST
     seen := Map()
     duplicates := []
-    for _, hotkey in configured {
+    for _, entry in HOTKEY_MANIFEST {
+        hotkey := String(entry["hotkey"])
         if seen.Has(hotkey)
             duplicates.Push(hotkey)
         else
             seen[hotkey] := true
     }
     return duplicates
+}
+
+RegisterManifestHotkeys() {
+    global HOTKEY_MANIFEST
+    duplicates := FindDuplicateHotkeys()
+    if (duplicates.Length > 0)
+        throw Error("Duplicate hotkeys in HOTKEY_MANIFEST: " JoinLines(duplicates))
+    for _, entry in HOTKEY_MANIFEST
+        Hotkey(entry["hotkey"], entry["handler"])
 }
 
 GetDirectoryDiagnostic(path) {
@@ -228,7 +285,18 @@ GetDirectoryDiagnostic(path) {
         attributes := FileGetAttrib(path)
         if InStr(attributes, "R")
             return "unwritable (read-only attribute)"
-        return "present (write probe not performed)"
+        probePath := path "\.local-automation-hub-write-probe-" A_TickCount "-" Random(100000, 999999) ".tmp"
+        try {
+            handle := FileOpen(probePath, "w")
+            if !IsObject(handle)
+                return "unwritable (write probe failed)"
+            handle.Close()
+            if (FileGetSize(probePath) != 0)
+                return "unwritable (write probe was not zero-byte)"
+            return "writable (zero-byte probe passed)"
+        } finally {
+            try FileDelete(probePath)
+        }
     } catch
         return "unwritable or inaccessible"
 }
