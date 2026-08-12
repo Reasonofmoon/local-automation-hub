@@ -122,7 +122,7 @@ class KakaoLogin {
 - Consumes: approved config fields `General`, `KakaoAccounts`, `Snippets`, and `Workspace.*`.
 - Produces: `AppContext`, `CommandRegistry`, `HubConfig`, `SafeLogger`, and the common test runner used by every later task.
 
-- [ ] **Step 1: Write failing core tests**
+- [x] **Step 1: Write failing core tests**
 
 ```ahk
 #Requires AutoHotkey v2.0
@@ -142,7 +142,7 @@ AssertFalse(InStr(safe, "private"), "redacts clipboard value")
 ExitWithTestResult()
 ```
 
-- [ ] **Step 2: Run the core test and confirm the expected failure**
+- [x] **Step 2: Run the core test and confirm the expected failure**
 
 Run:
 
@@ -152,7 +152,7 @@ Run:
 
 Expected: non-zero exit with an include error because the core classes do not exist.
 
-- [ ] **Step 3: Implement the minimum core contracts**
+- [x] **Step 3: Implement the minimum core contracts**
 
 Implement `CommandRegistry` with a `Map` keyed by command ID, lowercase substring search across label and joined tags, risk validation limited to `low|medium|high`, and `try/catch` isolation in `Invoke`. Implement `HubConfig.Load` with `IniRead`, returning nested maps without credentials; `Validate` returns an array of actionable errors. Implement `SafeLogger.Redact` with case-insensitive removal of `password=`, `secret=`, `clipboard=`, and credential blob values, and ensure log files live under `var/logs/`.
 
@@ -176,7 +176,7 @@ Items=app|notepad.exe;folder|%USERPROFILE%\Documents;url|https://localhost/
 
 `HubConfig.Load`는 일반 값에서 `%NAME%` 환경 변수를 확장하고, 문구 본문에서 `\n`을 AutoHotkey 줄바꿈 `` `n ``으로, `\\`를 리터럴 백슬래시로 디코딩한다. 알 수 없는 이스케이프는 설정 오류로 보고하며 암묵적으로 수정하지 않는다.
 
-- [ ] **Step 4: Run core validation and tests**
+- [x] **Step 4: Run core validation and tests**
 
 Run:
 
@@ -187,7 +187,7 @@ Run:
 
 Expected: validation exit code `0`; tests print `PASS` and exit code `0`.
 
-- [ ] **Step 5: Commit the core harness**
+- [x] **Step 5: Commit the core harness**
 
 ```powershell
 git add .gitignore config/settings.example.ini src/core tests/TestSupport.ahk tests/core-tests.ahk tests/Run-Tests.ps1
@@ -205,7 +205,7 @@ git commit -m "feat: add automation hub core"
 - Consumes: `CommandRegistry.Search(query)`, `CommandRegistry.Invoke(id, appContext)`, `HubConfig.Load(path)`.
 - Produces: `CommandPalette.Show()`, `CommandPalette.Hide()`, `RegisterBuiltInCommands(registry, appContext)`, and global hotkeys `CapsLock & Space` and `^!Esc`.
 
-- [ ] **Step 1: Add failing palette state tests**
+- [x] **Step 1: Add failing palette state tests**
 
 ```ahk
 palette := CommandPalette(registry, appContext)
@@ -217,13 +217,13 @@ appContext.Cancel()
 AssertTrue(appContext.IsCancelled(), "emergency stop sets cancellation")
 ```
 
-- [ ] **Step 2: Run the targeted test and confirm failure**
+- [x] **Step 2: Run the targeted test and confirm failure**
 
 Run `& 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe' tests\core-tests.ahk`.
 
 Expected: failure because `CommandPalette` is undefined.
 
-- [ ] **Step 3: Implement the palette and entry point**
+- [x] **Step 3: Implement the palette and entry point**
 
 Create a single-instance GUI with an edit control and list view. Refresh results on `Change`, execute the selected row on Enter or double-click, support numeric selection `1` through `9`, close on Escape, and display caught errors through `AppContext.Notify`. `main.ahk` must only load config, create context/registry/modules, register commands, and bind:
 
@@ -232,7 +232,7 @@ CapsLock & Space::palette.Show()
 ^!Esc::appContext.Cancel("Emergency stop requested")
 ```
 
-- [ ] **Step 4: Validate without launching the GUI and run core tests**
+- [x] **Step 4: Validate without launching the GUI and run core tests**
 
 Run:
 
@@ -243,7 +243,7 @@ Run:
 
 Expected: both exit code `0`.
 
-- [ ] **Step 5: Commit the command palette**
+- [x] **Step 5: Commit the command palette**
 
 ```powershell
 git add main.ahk src/core/Palette.ahk tests/core-tests.ahk
@@ -262,7 +262,7 @@ git commit -m "feat: add command palette"
 - Consumes: snippet maps from `HubConfig`, active-window metadata, `AppContext.IsCancelled()`.
 - Produces: `SnippetService.Search(query)` and `SnippetService.Insert(id)`.
 
-- [ ] **Step 1: Write failing snippet tests with injected adapters**
+- [x] **Step 1: Write failing snippet tests with injected adapters**
 
 ```ahk
 adapter := FakeInputAdapter("before")
@@ -274,17 +274,17 @@ adapter.isPasswordControl := true
 AssertThrows(() => service.Insert("multi"), "blocks password controls")
 ```
 
-- [ ] **Step 2: Run the targeted test and confirm failure**
+- [x] **Step 2: Run the targeted test and confirm the expected failure**
 
 Run `& 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe' tests\snippets-tests.ahk`.
 
 Expected: failure because `SnippetService` and `FakeInputAdapter` contracts are not implemented.
 
-- [ ] **Step 3: Implement safe insertion**
+- [x] **Step 3: Implement safe insertion**
 
 Use direct `SendText` for single-line content. Decode the config's explicit `\n` escape before deciding whether content is multiline. For multiline content, save `ClipboardAll()`, assign only the snippet body, paste, and restore the saved clipboard in `finally`. Reject elevated windows when the hub is not elevated and controls whose class/name indicates password input. Register one palette command per snippet with ID `snippet.<config-id>`.
 
-- [ ] **Step 4: Run snippet validation and test**
+- [x] **Step 4: Run snippet validation and test**
 
 Run:
 
@@ -295,7 +295,7 @@ Run:
 
 Expected: exit code `0`, clipboard restoration assertions pass.
 
-- [ ] **Step 5: Commit snippets**
+- [x] **Step 5: Commit snippets**
 
 ```powershell
 git add main.ahk src/modules/Snippets.ahk tests/snippets-tests.ahk tests/Run-Tests.ps1
@@ -316,7 +316,7 @@ git commit -m "feat: add safe snippet insertion"
 - Consumes: ordered workspace item arrays, injected `runner`/`activator`, monitor work areas.
 - Produces: `WorkspaceService.RunMode(modeId)`, `WindowManager.MoveActive(position)`, and `WindowManager.MoveToMonitor(direction)`.
 
-- [ ] **Step 1: Write failing aggregation and geometry tests**
+- [x] **Step 1: Write failing aggregation and geometry tests**
 
 ```ahk
 runner := FakeWorkspaceRunner(Map("bad.exe", false))
@@ -330,7 +330,7 @@ AssertEqual(960, rect.width, "uses half work area")
 AssertEqual(1040, rect.height, "excludes taskbar")
 ```
 
-- [ ] **Step 2: Run both tests and confirm failure**
+- [x] **Step 2: Run both tests and confirm failure**
 
 Run:
 
@@ -341,17 +341,17 @@ Run:
 
 Expected: undefined-class failures.
 
-- [ ] **Step 3: Implement partial-failure launching and work-area placement**
+- [x] **Step 3: Implement partial-failure launching and work-area placement**
 
 Parse each item strictly as `app|value`, `folder|value`, or `url|value`. Activate an existing app process before calling `Run`, continue after individual errors, and return maps containing `succeeded`, `skipped`, and `failed`. Calculate left/right/full rectangles from `MonitorGetWorkArea`; preserve window size while moving between monitors and clamp it inside the destination work area.
 
-- [ ] **Step 4: Validate modules and run their tests**
+- [x] **Step 4: Validate modules and run their tests**
 
 Run `powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only workspaces,windows`.
 
 Expected: all selected validations and tests pass.
 
-- [ ] **Step 5: Commit both low-risk modules**
+- [x] **Step 5: Commit both low-risk modules**
 
 ```powershell
 git add main.ahk src/modules/Workspaces.ahk src/modules/WindowManager.ahk tests/workspaces-tests.ahk tests/windows-tests.ahk tests/Run-Tests.ps1
@@ -370,7 +370,7 @@ git commit -m "feat: add workspace and window commands"
 - Consumes: Explorer-selected paths, fixed `YYYY-MM-DD` date for deterministic tests.
 - Produces: `ExplorerSelection.GetRegularFiles()` and `FileOrganizer.BuildPlan(paths, dateStamp)`; no filesystem mutation in this task.
 
-- [ ] **Step 1: Write failing plan tests**
+- [x] **Step 1: Write failing plan tests**
 
 ```ahk
 root := CreateTempDirectory()
@@ -384,23 +384,23 @@ collisionPlan := organizer.BuildPlan([source], "2026-08-12")
 AssertEqual(root "\2026\08\2026-08-12_report (2).txt", collisionPlan[1].destination, "avoids overwrite")
 ```
 
-- [ ] **Step 2: Run the file test and confirm failure**
+- [x] **Step 2: Run the file test and confirm failure**
 
 Run `& 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe' tests\file-organizer-tests.ahk`.
 
 Expected: failure because `FileOrganizer` does not exist.
 
-- [ ] **Step 3: Implement selection filters and pure plan construction**
+- [x] **Step 3: Implement selection filters and pure plan construction**
 
 Use the active Explorer window's `Document.SelectedItems` collection. Normalize each path with `GetFullPathName`, reject folders and files with hidden/system attributes, deduplicate case-insensitively, and reject empty selection. `BuildPlan` must return objects containing `source`, `destination`, `status := "pending"`; it must create no folders and move no files.
 
-- [ ] **Step 4: Validate and run plan tests**
+- [x] **Step 4: Validate and run plan tests**
 
 Run `powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only file-organizer`.
 
 Expected: selection filter unit cases and collision planning pass without changing source files.
 
-- [ ] **Step 5: Commit plan-only file organization**
+- [x] **Step 5: Commit plan-only file organization**
 
 ```powershell
 git add src/system/ExplorerSelection.ahk src/modules/FileOrganizer.ahk tests/file-organizer-tests.ahk tests/Run-Tests.ps1
@@ -418,7 +418,7 @@ git commit -m "feat: add file organization planning"
 - Consumes: immutable plan from `BuildPlan`, injected `confirmer(previewText)` callback.
 - Produces: `ApplyPlan(plan, confirmer)` and `UndoLast(confirmer)` with state at `var/state/file-undo.ini`.
 
-- [ ] **Step 1: Add failing deny/apply/partial-failure/undo tests**
+- [x] **Step 1: Add failing deny/apply/partial-failure/undo tests**
 
 ```ahk
 denied := organizer.ApplyPlan(plan, (*) => false)
@@ -433,21 +433,21 @@ AssertFalse(FileExist(plan[1].destination), "undo removes moved path")
 AssertThrows(() => organizer.UndoLast((*) => true), "undo state is single use")
 ```
 
-- [ ] **Step 2: Run the targeted test and confirm failure**
+- [x] **Step 2: Run the targeted test and confirm failure**
 
 Expected: missing `ApplyPlan` or `UndoLast` behavior.
 
-- [ ] **Step 3: Implement preview, confirmation, state, and rollback boundaries**
+- [x] **Step 3: Implement preview, confirmation, state, and rollback boundaries**
 
 Immediately before moving, re-check that every source still exists and every destination is still free; if drift exists, abort the full plan and require a new preview. After confirmation, create destination directories per item, continue across move failures, and persist only successful source/destination pairs. Undo must preview the reverse mapping, refuse if the original path is occupied, restore successful items, and delete state only after all stored items are restored.
 
-- [ ] **Step 4: Run the complete temporary-file scenario**
+- [x] **Step 4: Run the complete temporary-file scenario**
 
 Run `powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only file-organizer`.
 
 Expected: deny, apply, collision, partial failure, drift abort, and one-step undo cases pass using only a generated temp directory.
 
-- [ ] **Step 5: Commit confirmed file operations**
+- [x] **Step 5: Commit confirmed file operations**
 
 ```powershell
 git add main.ahk src/modules/FileOrganizer.ahk tests/file-organizer-tests.ahk
@@ -466,7 +466,7 @@ git commit -m "feat: add confirmed file moves and undo"
 - Consumes: a configured generic credential target such as `LocalAutomationHub/Kakao/work`.
 - Produces: `CredentialStore.Read(targetName, consumer)` and an interactive registration helper that writes a Generic credential with `CredWriteW`.
 
-- [ ] **Step 1: Write failing missing-target and consumer tests**
+- [x] **Step 1: Write failing missing-target and consumer tests**
 
 ```ahk
 store := CredentialStore()
@@ -478,17 +478,17 @@ AssertTrue(seen, "secret is scoped to consumer callback")
 AssertTrue(fake.WasWiped(), "temporary secret buffer is wiped")
 ```
 
-- [ ] **Step 2: Run the credential test and confirm failure**
+- [x] **Step 2: Run the credential test and confirm failure**
 
 Run `& 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe' tests\credential-tests.ahk`.
 
 Expected: undefined credential adapter.
 
-- [ ] **Step 3: Implement direct Win32 credential access**
+- [x] **Step 3: Implement direct Win32 credential access**
 
 Call `Advapi32\CredReadW` with `CRED_TYPE_GENERIC := 1`, validate `CredentialBlobSize` as even UTF-16 bytes, copy into an allocated buffer, invoke the consumer with `StrGet`, call `RtlSecureZeroMemory` on the copy, and call `CredFree` in `finally`. Never concatenate the secret into an error, command line, log message, or return value. The registration script must use `Read-Host -AsSecureString`, marshal only for `CredWriteW`, wipe the unmanaged string in `finally`, and print only the target name and success/failure.
 
-- [ ] **Step 4: Parse PowerShell and run credential tests**
+- [x] **Step 4: Parse PowerShell and run credential tests**
 
 Run:
 
@@ -500,7 +500,7 @@ rg -n -i "password\s*=|secret\s*=|CredentialBlob" . -g '!tasks/**' -g '!docs/**'
 
 Expected: parser and tests pass; search shows API field names and redaction rules only, with no literal credential values.
 
-- [ ] **Step 5: Commit credential integration**
+- [x] **Step 5: Commit credential integration**
 
 ```powershell
 git add src/modules/CredentialStore.ahk scripts/Register-Credential.ps1 tests/credential-tests.ahk tests/Run-Tests.ps1
@@ -508,6 +508,8 @@ git commit -m "feat: add secure credential adapter"
 ```
 
 ### Task 8: Kakao UI capability gate and guarded login flow
+
+> **Task 8 disposition (2026-08-12): ABANDONED / UNSUPPORTED.** The installed Kakao UI and accessibility runtime did not expose a stable login/password target. The capability inspection is recorded in `docs/harness/runs/2026-08-12-local-automation-hub/kakao-ui-capability.md`; real credential registration/login, login automation, and Kakao UI QA are not applicable/deferred, not failures. The steps below remain unchecked because no supported login path exists.
 
 **Files:**
 - Create: `src/modules/KakaoLogin.ahk`
@@ -582,28 +584,28 @@ git commit -m "feat: add guarded Kakao login"
 - Consumes: repository root, AutoHotkey executable path, `main.ahk`, local configuration.
 - Produces: `Manage-Startup.ps1 -Action Install|Remove|Status`, palette diagnostics command, complete setup/recovery documentation.
 
-- [ ] **Step 1: Add a failing PowerShell contract check**
+- [x] **Step 1: Add a failing PowerShell contract check**
 
 ```powershell
 $commands = Get-Command "$PSScriptRoot\..\scripts\Manage-Startup.ps1" -Syntax -ErrorAction Stop
 if ($commands -notmatch '-Action') { throw 'Manage-Startup.ps1 must expose -Action' }
 ```
 
-- [ ] **Step 2: Run the parser/contract check and confirm failure**
+- [x] **Step 2: Run the parser/contract check and confirm failure**
 
 Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Validate-PowerShell.ps1`.
 
 Expected: failure because startup management is absent.
 
-- [ ] **Step 3: Implement idempotent startup and diagnostics**
+- [x] **Step 3: Implement idempotent startup and diagnostics**
 
 Use `WScript.Shell.CreateShortcut` to create exactly one shortcut under `[Environment]::GetFolderPath('Startup')`, targeting `AutoHotkey64.exe` with `main.ahk` as the quoted argument and the repository as working directory. `Remove` deletes only that exact shortcut; `Status` performs no mutation. Add a `system.diagnostics` command that reports configuration errors, missing executables, duplicate command IDs/hotkeys, unwritable state/log directories, and credential target names without reading credentials.
 
-- [ ] **Step 4: Document setup and validate dry-run behavior**
+- [x] **Step 4: Document setup and validate dry-run behavior**
 
 README must cover AutoHotkey 2.0.26+, copying `settings.example.ini` to ignored `settings.local.ini`, credential registration, hub keys, every module, emergency stop, startup status/install/remove, log/state locations, file undo limits, and the final manual Kakao test. Run `Manage-Startup.ps1 -Action Status`; do not install startup during automated verification.
 
-- [ ] **Step 5: Commit operations and documentation**
+- [x] **Step 5: Commit operations and documentation**
 
 ```powershell
 git add scripts README.md main.ahk docs/harness/manifest.md config/settings.example.ini
@@ -620,7 +622,7 @@ git commit -m "docs: add hub setup and diagnostics"
 - Consumes: every prior module and test runner.
 - Produces: artifact-backed final verification report and an explicit list of manual checks that remain user-owned.
 
-- [ ] **Step 1: Run all automated validation**
+- [x] **Step 1: Run all automated validation**
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1
@@ -630,7 +632,7 @@ git diff --check
 
 Expected: every `.ahk` file passes `/Validate`, all related tests exit `0`, every PowerShell file parses, and Git reports no whitespace errors.
 
-- [ ] **Step 2: Run security and repository-boundary searches**
+- [x] **Step 2: Run security and repository-boundary searches**
 
 ```powershell
 rg -n -i "password\s*=\s*[^;\r\n]+|secret\s*=\s*[^;\r\n]+|A_Clipboard.*password|SendText\(.*password" . -g '!tasks/**' -g '!docs/**'
@@ -639,15 +641,15 @@ git status --short
 
 Expected: no literal password or secret values; only expected uncommitted verification report/plan checkbox changes are present.
 
-- [ ] **Step 3: Record automated evidence**
+- [x] **Step 3: Record automated evidence**
 
 Write exact command, timestamp, exit code, pass/fail count, changed files, and redacted observations to `verification.md`. Do not claim actual Kakao login, multi-monitor placement, Explorer COM selection, or Startup-folder installation succeeded unless each was visibly performed.
 
-- [ ] **Step 4: Perform user-visible manual QA with explicit confirmation**
+- [ ] **Step 4: Perform user-visible manual QA with explicit confirmation** *(not performed; real UI, real Kakao, real credentials, real Startup install/remove, user files, and multi-monitor movement remain user-owned/N/A as documented in `verification.md`)*
 
 Run the hub only after automated gates pass. Verify palette open/search/numeric execution, emergency stop, one single-line and one multiline snippet with clipboard restoration, partial-failure workspace summary, window left/right/full placement, temp-file preview/apply/undo, mock login, and finally one real credential registration/login with the user present. Multi-monitor movement is marked `not applicable` when only one monitor exists.
 
-- [ ] **Step 5: Commit verification artifacts**
+- [x] **Step 5: Commit verification artifacts**
 
 ```powershell
 git add docs/harness/runs/2026-08-12-local-automation-hub/verification.md tasks/PLAN-local-automation-hub.md
