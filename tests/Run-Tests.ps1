@@ -105,6 +105,10 @@ if (-not $Only -or $requested -contains 'workspaces') {
 if (-not $Only -or $requested -contains 'windows') {
     $moduleFiles += Join-Path $PSScriptRoot '..\src\modules\WindowManager.ahk'
 }
+if (-not $Only -or $requested -contains 'file-organizer') {
+    $moduleFiles += Join-Path $PSScriptRoot '..\src\system\ExplorerSelection.ahk'
+    $moduleFiles += Join-Path $PSScriptRoot '..\src\modules\FileOrganizer.ahk'
+}
 
 $failures = 0
 foreach ($module in $moduleFiles) {
