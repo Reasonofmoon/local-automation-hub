@@ -9,6 +9,8 @@
 #Include src\modules\Snippets.ahk
 #Include src\modules\Workspaces.ahk
 #Include src\modules\WindowManager.ahk
+#Include src\system\ExplorerSelection.ahk
+#Include src\modules\FileOrganizer.ahk
 
 rootDir := A_ScriptDir
 configPath := FileExist(rootDir "\config\settings.local.ini")
@@ -44,5 +46,38 @@ RegisterBuiltInCommands(registry, context) {
     windowService := WindowManager(Win32WindowAdapter())
     RegisterWorkspaceCommands(registry, workspaceService)
     RegisterWindowCommands(registry, windowService)
+    fileOrganizer := FileOrganizer(A_ScriptDir "\var\state\file-undo.ini")
+    RegisterFileOrganizerCommands(registry, fileOrganizer)
     return registry
+}
+
+RegisterFileOrganizerCommands(registry, organizer) {
+    registry.Register(
+        "files.organize-selected",
+        "Files: Organize selected Explorer files",
+        ["files", "organize", "explorer", "move"],
+        "high",
+        ApplySelectedExplorerFiles.Bind(organizer)
+    )
+    registry.Register(
+        "files.undo-last-organize",
+        "Files: Undo last organize",
+        ["files", "undo", "organize"],
+        "high",
+        UndoLastOrganizedFiles.Bind(organizer)
+    )
+}
+
+ApplySelectedExplorerFiles(organizer, *) {
+    paths := ExplorerSelection().GetRegularFiles()
+    plan := organizer.BuildPlan(paths, FormatTime(A_Now, "yyyy-MM-dd"))
+    return organizer.ApplyPlan(plan, ConfirmFileOrganizerPreview)
+}
+
+UndoLastOrganizedFiles(organizer, *) {
+    return organizer.UndoLast(ConfirmFileOrganizerPreview)
+}
+
+ConfirmFileOrganizerPreview(preview) {
+    return MsgBox(preview, "Local Automation Hub", "YesNo Icon?") = "Yes"
 }
