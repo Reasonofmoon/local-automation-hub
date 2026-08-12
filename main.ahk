@@ -7,6 +7,8 @@
 #Include src\core\Logger.ahk
 #Include src\core\Palette.ahk
 #Include src\modules\Snippets.ahk
+#Include src\modules\Workspaces.ahk
+#Include src\modules\WindowManager.ahk
 
 rootDir := A_ScriptDir
 configPath := FileExist(rootDir "\config\settings.local.ini")
@@ -38,6 +40,9 @@ CancelAutomation() {
 }
 
 RegisterBuiltInCommands(registry, context) {
-    ; Task-specific modules register their own commands as they become available.
+    workspaceService := WorkspaceService(Win32WorkspaceRunner(), context.config["Workspace"])
+    windowService := WindowManager(Win32WindowAdapter())
+    RegisterWorkspaceCommands(registry, workspaceService)
+    RegisterWindowCommands(registry, windowService)
     return registry
 }
