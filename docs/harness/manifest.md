@@ -58,3 +58,18 @@ orchestrator → builder → qa-reviewer → orchestrator
 | --- | --- | --- | --- |
 | 2026-08-12 | 전체 | 초기 하네스 설계 | 통합 단축키 허브 신설 |
 
+## Task 9 운영 표면
+
+`scripts/Manage-Startup.ps1`은 `-Action Install|Remove|Status`를 제공합니다. `Install`은 Windows Startup 폴더에 `Local Automation Hub.lnk` 정확히 하나를 만들고 AutoHotkey v2 실행 파일, `main.ahk` 인수, 저장소 working directory를 기록합니다. `Remove`는 그 정확한 경로만 삭제하며, `Status`는 shortcut 속성만 읽고 변이하지 않습니다. 자동 검증에서는 `Status`만 실행합니다.
+
+`system.diagnostics` 팔레트 명령은 설정 오류, 누락 실행 파일, 중복 command ID/hotkey, `var/logs`·`var/state` 상태, Credential Manager target 이름을 보고합니다. credential 값이나 Credential Manager blob은 읽지 않습니다. Kakao 로그인 자동화는 Task 8에서 unsupported로 폐기되어 현재 runtime/module/login command가 없습니다. capability 근거는 `docs/harness/runs/2026-08-12-local-automation-hub/kakao-ui-capability.md`이며, 등록 helper는 target 이름만 받아 Credential Manager에 등록합니다.
+
+검증:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Validate-PowerShell.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Manage-Startup.ps1 -Action Status
+git diff --check
+```
+
+AutoHotkey는 `tests/Run-Tests.ps1`의 process-owned runner와 `/Validate`로 검증합니다. TypeScript 소스가 없으므로 `npx tsc --noEmit`은 적용 대상이 아닙니다. Startup `Install`/`Remove`와 real Kakao UI는 사용자 명시적 수동 확인 범위입니다.
