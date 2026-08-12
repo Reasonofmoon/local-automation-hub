@@ -9,12 +9,9 @@ class SafeLogger {
 
     static Redact(value) {
         value := String(value)
-        ; Keep the field name and remove only the value. The boundary prevents
-        ; a following field from being swallowed when logs are space-delimited.
-        value := RegExReplace(value, "i)(password|secret|clipboard)\s*=\s*([^\s;,&#]+)", "$1=[REDACTED]")
-        value := RegExReplace(value, "i)(credentialblob)\s*=\s*([^\s;,&#]+)", "$1=[REDACTED]")
-        value := RegExReplace(value, "i)(password|secret|clipboard)\s*:\s*([^\s;,&#]+)", "$1:[REDACTED]")
-        value := RegExReplace(value, "i)(credentialblob)\s*:\s*([^\s;,&#]+)", "$1:[REDACTED]")
+        ; A following key/value field, delimiter, or end-of-line terminates the
+        ; secret so whitespace inside an unquoted value cannot leak.
+        value := RegExReplace(value, "i)(password|secret|clipboard|credential_?blob)\s*([=:])\s*.*?(?=\s+[A-Za-z][A-Za-z0-9_.-]*\s*[=:]|[;,&#\r\n]|$)", "$1$2[REDACTED]")
         return value
     }
 

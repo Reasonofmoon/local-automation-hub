@@ -34,6 +34,10 @@ class HubConfig {
             if (currentSection = "General") {
                 config["General"][key] := value
             } else if (currentSection = "KakaoAccounts") {
+                if IsSensitiveKakaoAccountKey(key)
+                    throw ValueError("KakaoAccounts key cannot contain credential data: " key)
+                if !IsKakaoCredentialTarget(value)
+                    throw ValueError("KakaoAccounts target must be a credential reference: " key)
                 config["KakaoAccounts"][key] := value
             } else if (currentSection = "Snippets") {
                 config["Snippets"][key] := value
@@ -87,8 +91,10 @@ class HubConfig {
             for alias, target in config["KakaoAccounts"] {
                 if (Trim(String(alias)) = "" || Trim(String(target)) = "")
                     errors.Push("KakaoAccounts entries require alias and target: " alias)
-                if RegExMatch(String(target), "i)(password|clipboard|credentialblob)\s*=")
-                    errors.Push("KakaoAccounts target must not contain credential data: " alias)
+                if IsSensitiveKakaoAccountKey(alias)
+                    errors.Push("KakaoAccounts key cannot contain credential data: " alias)
+                if !IsKakaoCredentialTarget(target)
+                    errors.Push("KakaoAccounts target must be a credential reference: " alias)
             }
         }
         if config.Has("Snippets") && IsObject(config["Snippets"]) {
@@ -118,6 +124,15 @@ class HubConfig {
         CheckUnexpanded(config, errors, "")
         return errors
     }
+}
+
+IsSensitiveKakaoAccountKey(key) {
+    normalizedKey := StrLower(Trim(String(key)))
+    return RegExMatch(normalizedKey, "i)(password|secret|credential_?blob|credential)")
+}
+
+IsKakaoCredentialTarget(target) {
+    return RegExMatch(Trim(String(target)), "^LocalAutomationHub/Kakao/[A-Za-z0-9._-]+$")
 }
 
 ParseWorkspaceItems(value) {

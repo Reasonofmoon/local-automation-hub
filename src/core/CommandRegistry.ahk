@@ -22,7 +22,7 @@ class CommandRegistry {
         }
         if !IsRisk(risk)
             throw ValueError("Invalid command risk: " risk)
-        if !IsObject(handler)
+        if !IsObject(handler) || !HasMethod(handler, "Call")
             throw TypeError("Command handler must be callable")
 
         normalizedTags := []
