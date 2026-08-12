@@ -17,36 +17,12 @@ HOTKEY_MANIFEST := [
     Map("hotkey", "^!Esc", "handler", CancelAutomation)
 ]
 
-rootDir := A_ScriptDir
-configPath := FileExist(rootDir "\config\settings.local.ini")
-    ? rootDir "\config\settings.local.ini"
-    : rootDir "\config\settings.example.ini"
-logger := SafeLogger(rootDir)
-configLoadError := ""
-try {
-    config := HubConfig.Load(configPath)
-} catch as caughtError {
-    ; Keep startup safe: no configured module is constructed after a load failure.
-    config := CreateEmptyConfig()
-    configLoadError := SafeLogger.Redact(SafeErrorMessage(caughtError))
+if (!IsSet(MAIN_STARTUP_HEADLESS) || !MAIN_STARTUP_HEADLESS) {
+    hub := InitializeHub(A_ScriptDir, true)
+    context := hub["context"]
+    registry := hub["registry"]
+    palette := hub["palette"]
 }
-context := AppContext(rootDir, config, logger)
-context.configLoadError := configLoadError
-if (configLoadError != "")
-    context.Notify("Configuration load failed; diagnostics-only mode. " configLoadError, "error")
-validationErrors := HubConfig.Validate(config)
-if (validationErrors.Length > 0)
-    context.Notify("Configuration validation failed: " validationErrors.Length " issue(s)", "error")
-registry := CommandRegistry()
-RegisterSystemDiagnostics(registry, context)
-if (configLoadError = "") {
-    RegisterBuiltInCommands(registry, context)
-    snippets := SnippetService(config["Snippets"], Win32InputAdapter(), context)
-    RegisterSnippetCommands(registry, snippets)
-}
-palette := CommandPalette(registry, context)
-
-RegisterManifestHotkeys()
 
 ShowPalette(*) {
     global palette
@@ -58,13 +34,48 @@ CancelAutomation(*) {
     context.Cancel("Emergency stop requested")
 }
 
+InitializeHub(rootDir, registerHotkeys := true) {
+    rootDir := String(rootDir)
+    configPath := FileExist(rootDir "\config\settings.local.ini")
+        ? rootDir "\config\settings.local.ini"
+        : rootDir "\config\settings.example.ini"
+    logger := SafeLogger(rootDir)
+    configLoadError := ""
+    try {
+        config := HubConfig.Load(configPath)
+    } catch as caughtError {
+        ; Keep startup safe: no configured module is constructed after a load failure.
+        config := CreateEmptyConfig()
+        configLoadError := SafeLogger.Redact(SafeErrorMessage(caughtError))
+    }
+    context := AppContext(rootDir, config, logger)
+    context.configLoadError := configLoadError
+    if (configLoadError != "")
+        context.Notify("Configuration load failed; diagnostics-only mode. " configLoadError, "error")
+    validationErrors := HubConfig.Validate(config)
+    if (validationErrors.Length > 0)
+        context.Notify("Configuration validation failed: " validationErrors.Length " issue(s)", "error")
+    registry := CommandRegistry()
+    RegisterSystemDiagnostics(registry, context)
+    if (configLoadError = "") {
+        RegisterBuiltInCommands(registry, context)
+        snippets := SnippetService(config["Snippets"], Win32InputAdapter(), context)
+        RegisterSnippetCommands(registry, snippets)
+    }
+    palette := CommandPalette(registry, context)
+
+    if registerHotkeys
+        RegisterManifestHotkeys()
+    return Map("context", context, "registry", registry, "palette", palette)
+}
+
 RegisterBuiltInCommands(registry, context) {
-    workspaceService := WorkspaceService(Win32WorkspaceRunner(), context.config["Workspace"])
-    windowService := WindowManager(Win32WindowAdapter())
-    RegisterWorkspaceCommands(registry, workspaceService)
-    RegisterWindowCommands(registry, windowService)
-    fileOrganizer := FileOrganizer(A_ScriptDir "\var\state\file-undo.ini")
-    RegisterFileOrganizerCommands(registry, fileOrganizer)
+    workspaceRunnerService := WorkspaceService(Win32WorkspaceRunner(), context.config["Workspace"])
+    activeWindowManager := WindowManager(Win32WindowAdapter())
+    RegisterWorkspaceCommands(registry, workspaceRunnerService)
+    RegisterWindowCommands(registry, activeWindowManager)
+    organizerService := FileOrganizer(A_ScriptDir "\var\state\file-undo.ini")
+    RegisterFileOrganizerCommands(registry, organizerService)
     return registry
 }
 
