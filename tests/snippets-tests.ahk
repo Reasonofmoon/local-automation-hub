@@ -9,16 +9,29 @@ class FakeInputAdapter {
         this._directText := ""
         this._pasteCount := 0
         this.isPasswordControl := false
+        this.isCustomControl := false
         this.isTargetElevated := false
         this.isHubElevated := false
         this.failPaste := false
+        this.hasFocusDrift := false
     }
 
     EnsureSafeTarget() {
         if this.isPasswordControl
             throw Error("Snippet insertion is blocked for password controls")
+        if this.isCustomControl
+            throw Error("Snippet insertion is blocked because the focused control is not a standard Edit or RichEdit control")
         if this.isTargetElevated && !this.isHubElevated
             throw Error("Snippet insertion is blocked for elevated targets")
+        return Map("target", "original")
+    }
+
+    ConfirmSafeTarget(targetSnapshot) {
+        if !IsObject(targetSnapshot) || !targetSnapshot.Has("target")
+            throw Error("Snippet insertion target snapshot is invalid")
+        if this.hasFocusDrift
+            throw Error("Snippet insertion is blocked because focus changed before input")
+        return this.EnsureSafeTarget()
     }
 
     CaptureClipboard() {
@@ -29,7 +42,8 @@ class FakeInputAdapter {
         this._clipboardText := text
     }
 
-    Paste() {
+    Paste(targetSnapshot) {
+        this.ConfirmSafeTarget(targetSnapshot)
         if this.failPaste
             throw Error("Paste failed")
         this._insertedText := this._clipboardText
@@ -40,7 +54,8 @@ class FakeInputAdapter {
         this._clipboardText := value
     }
 
-    SendText(text) {
+    SendText(targetSnapshot, text) {
+        this.ConfirmSafeTarget(targetSnapshot)
         this._directText := text
     }
 
@@ -84,6 +99,13 @@ singleService.Insert("single")
 AssertEqual("Great work!", singleAdapter.DirectText(), "sends a single-line snippet directly")
 AssertEqual("before", singleAdapter.ClipboardText(), "does not change clipboard for single-line snippet")
 
+directDriftAdapter := FakeInputAdapter("before")
+directDriftAdapter.hasFocusDrift := true
+directDriftService := SnippetService(Map("single", "safe"), directDriftAdapter)
+AssertThrows(() => directDriftService.Insert("single"), "blocks focus drift before direct send")
+AssertEqual("", directDriftAdapter.DirectText(), "does not send text after focus drift")
+AssertEqual("before", directDriftAdapter.ClipboardText(), "does not change clipboard after direct-send focus drift")
+
 adapter := FakeInputAdapter("before")
 service := SnippetService(Map("multi", Map("title", "Multi", "tags", ["lesson"], "body", "line 1\nline 2")), adapter)
 service.Insert("multi")
@@ -91,9 +113,23 @@ AssertEqual("before", adapter.ClipboardText(), "restores clipboard")
 AssertEqual("line 1`nline 2", adapter.InsertedText(), "inserts configured body")
 AssertEqual(1, adapter.PasteCount(), "pastes multiline snippet once")
 
+pasteDriftAdapter := FakeInputAdapter("before")
+pasteDriftAdapter.hasFocusDrift := true
+pasteDriftService := SnippetService(Map("multi", "line 1`nline 2"), pasteDriftAdapter)
+AssertThrows(() => pasteDriftService.Insert("multi"), "blocks focus drift before paste")
+AssertEqual("", pasteDriftAdapter.InsertedText(), "does not paste after focus drift")
+AssertEqual(0, pasteDriftAdapter.PasteCount(), "does not invoke paste after focus drift")
+AssertEqual("before", pasteDriftAdapter.ClipboardText(), "restores clipboard after focus drift before paste")
+
 adapter.isPasswordControl := true
 AssertThrows(() => service.Insert("multi"), "blocks password controls")
 AssertEqual("before", adapter.ClipboardText(), "does not alter clipboard for password controls")
+
+customControlAdapter := FakeInputAdapter("before")
+customControlAdapter.isCustomControl := true
+customControlService := SnippetService(Map("single", "safe"), customControlAdapter)
+AssertThrows(() => customControlService.Insert("single"), "blocks unknown or custom focused controls")
+AssertEqual("", customControlAdapter.DirectText(), "does not type into unknown or custom focused controls")
 
 elevatedAdapter := FakeInputAdapter("before")
 elevatedAdapter.isTargetElevated := true

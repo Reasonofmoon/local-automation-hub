@@ -29,17 +29,17 @@ class SnippetService {
         id := String(id)
         if !this.snippets.Has(id)
             throw Error("Unknown snippet: " id)
-        this.inputAdapter.EnsureSafeTarget()
+        targetSnapshot := this.inputAdapter.EnsureSafeTarget()
         body := NormalizeSnippet(id, this.snippets[id])["body"]
         if !InStr(body, "`n") {
-            this.inputAdapter.SendText(body)
+            this.inputAdapter.SendText(targetSnapshot, body)
             return true
         }
 
         savedClipboard := this.inputAdapter.CaptureClipboard()
         try {
             this.inputAdapter.SetClipboardText(body)
-            this.inputAdapter.Paste()
+            this.inputAdapter.Paste(targetSnapshot)
         } finally {
             this.inputAdapter.RestoreClipboard(savedClipboard)
             savedClipboard := ""
@@ -50,18 +50,55 @@ class SnippetService {
 
 class Win32InputAdapter {
     EnsureSafeTarget() {
-        focusedControl := ControlGetFocus("A")
-        if (focusedControl = "")
-            throw Error("Snippet insertion requires a focused control")
-        controlClass := ControlGetClassNN(focusedControl, "A")
-        controlStyle := ControlGetStyle(focusedControl, "A")
-        if IsPasswordControl(controlClass, controlStyle)
-            throw Error("Snippet insertion is blocked for password controls")
+        targetSnapshot := this.CaptureTargetSnapshot()
+        this.ValidateTargetSnapshot(targetSnapshot)
 
-        targetProcessId := WinGetPID("A")
+        targetProcessId := WinGetPID("ahk_id " targetSnapshot["windowHandle"])
+        if IsProcessElevated(targetProcessId) && !IsProcessElevated(DllCall("GetCurrentProcessId", "UInt"))
+            throw Error("Snippet insertion is blocked for elevated targets")
+        return targetSnapshot
+    }
+
+    ConfirmSafeTarget(targetSnapshot) {
+        if !IsObject(targetSnapshot)
+            throw Error("Snippet insertion target snapshot is invalid")
+        currentTarget := this.CaptureTargetSnapshot()
+        if !SameSnippetTarget(targetSnapshot, currentTarget)
+            throw Error("Snippet insertion is blocked because focus changed before input")
+        this.ValidateTargetSnapshot(currentTarget)
+        targetProcessId := WinGetPID("ahk_id " currentTarget["windowHandle"])
         if IsProcessElevated(targetProcessId) && !IsProcessElevated(DllCall("GetCurrentProcessId", "UInt"))
             throw Error("Snippet insertion is blocked for elevated targets")
         return true
+    }
+
+    CaptureTargetSnapshot() {
+        windowHandle := WinExist("A")
+        if !windowHandle
+            throw Error("Snippet insertion requires an active window")
+        focusedControl := ControlGetFocus("ahk_id " windowHandle)
+        if (focusedControl = "")
+            throw Error("Snippet insertion requires a focused standard text control; browser and custom controls are blocked")
+        controlHandle := ControlGetHwnd(focusedControl, "ahk_id " windowHandle)
+        if !controlHandle
+            throw Error("Snippet insertion is blocked because the focused control handle is unavailable")
+        controlClass := ControlGetClassNN(focusedControl, "ahk_id " windowHandle)
+        controlStyle := ControlGetStyle(focusedControl, "ahk_id " windowHandle)
+        return Map(
+            "windowHandle", windowHandle,
+            "controlHandle", controlHandle,
+            "controlClass", controlClass,
+            "controlStyle", controlStyle
+        )
+    }
+
+    ValidateTargetSnapshot(targetSnapshot) {
+        controlClass := targetSnapshot["controlClass"]
+        controlStyle := targetSnapshot["controlStyle"]
+        if !IsStandardTextControl(controlClass)
+            throw Error("Snippet insertion is blocked because the focused control is not a standard Edit or RichEdit control")
+        if IsPasswordControl(controlClass, controlStyle)
+            throw Error("Snippet insertion is blocked for password controls")
     }
 
     CaptureClipboard() {
@@ -74,7 +111,8 @@ class Win32InputAdapter {
             throw Error("Could not set clipboard for multiline snippet")
     }
 
-    Paste() {
+    Paste(targetSnapshot) {
+        this.ConfirmSafeTarget(targetSnapshot)
         Send("^v")
     }
 
@@ -82,7 +120,8 @@ class Win32InputAdapter {
         A_Clipboard := savedClipboard
     }
 
-    SendText(text) {
+    SendText(targetSnapshot, text) {
+        this.ConfirmSafeTarget(targetSnapshot)
         SendText(String(text))
     }
 }
@@ -138,6 +177,18 @@ IsPasswordControl(controlClass, controlStyle) {
     if RegExMatch(String(controlClass), "i)(password|credential)")
         return true
     return (Integer(controlStyle) & 0x20) != 0
+}
+
+IsStandardTextControl(controlClass) {
+    controlClass := String(controlClass)
+    return RegExMatch(controlClass, "i)^(Edit|RichEdit\d*[A-Za-z]*)\d*$") != 0
+}
+
+SameSnippetTarget(firstTarget, secondTarget) {
+    return firstTarget["windowHandle"] = secondTarget["windowHandle"]
+        && firstTarget["controlHandle"] = secondTarget["controlHandle"]
+        && firstTarget["controlClass"] = secondTarget["controlClass"]
+        && firstTarget["controlStyle"] = secondTarget["controlStyle"]
 }
 
 IsProcessElevated(processId) {
