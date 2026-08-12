@@ -109,6 +109,9 @@ if (-not $Only -or $requested -contains 'file-organizer') {
     $moduleFiles += Join-Path $PSScriptRoot '..\src\system\ExplorerSelection.ahk'
     $moduleFiles += Join-Path $PSScriptRoot '..\src\modules\FileOrganizer.ahk'
 }
+if (-not $Only -or $requested -contains 'credential') {
+    $moduleFiles += Join-Path $PSScriptRoot '..\src\modules\CredentialStore.ahk'
+}
 
 $failures = 0
 foreach ($module in $moduleFiles) {
