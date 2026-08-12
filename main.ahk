@@ -6,6 +6,7 @@
 #Include src\core\Config.ahk
 #Include src\core\Logger.ahk
 #Include src\core\Palette.ahk
+#Include src\modules\Snippets.ahk
 
 rootDir := A_ScriptDir
 configPath := FileExist(rootDir "\config\settings.local.ini")
@@ -19,6 +20,8 @@ if (validationErrors.Length > 0)
     context.Notify("Configuration validation failed: " validationErrors.Length " issue(s)", "error")
 registry := CommandRegistry()
 RegisterBuiltInCommands(registry, context)
+snippets := SnippetService(config["Snippets"], Win32InputAdapter(), context)
+RegisterSnippetCommands(registry, snippets)
 palette := CommandPalette(registry, context)
 
 CapsLock & Space::ShowPalette()

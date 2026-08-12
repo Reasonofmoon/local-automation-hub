@@ -21,7 +21,24 @@ if (-not $testFiles) {
     throw 'No test files selected.'
 }
 
+$moduleFiles = @()
+if (-not $Only -or $requested -contains 'snippets') {
+    $moduleFiles += Join-Path $PSScriptRoot '..\src\modules\Snippets.ahk'
+}
+
 $failures = 0
+foreach ($module in $moduleFiles) {
+    $modulePath = [System.IO.Path]::GetFullPath($module)
+    Write-Host "[VALIDATE] $modulePath"
+    $moduleOutput = (& $ahk '/ErrorStdOut=UTF-8' '/Validate' $modulePath 2>&1 | Out-String)
+    if ($moduleOutput.Trim()) {
+        Write-Host $moduleOutput.TrimEnd()
+    }
+    $moduleExit = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+    if ($moduleExit -ne 0 -or $moduleOutput -match '==>|(?i)error') {
+        $failures++
+    }
+}
 foreach ($test in $testFiles) {
     Write-Host "[VALIDATE] $($test.FullName)"
     $validationOutput = (& $ahk '/ErrorStdOut=UTF-8' '/Validate' $test.FullName 2>&1 | Out-String)
