@@ -25,3 +25,9 @@
 
 - Pretty-printed Orca envelopes may legitimately contain thousands of nonempty lines; a fixed line cap rejects valid output solely because of formatting.
 - Keep the UTF-8/character payload bound and report line count only as safe diagnostic metadata. The balanced top-level scanner and exact-one-envelope validation remain the framing protections.
+
+## 2026-08-13 - Mirror installed CLI response schemas in contract tests
+
+- Orca `terminal wait --json` returns readiness under `result.wait.satisfied`; its `status` can remain `running` even when the requested `tui-idle` condition is satisfied.
+- A fake response shaped as a convenient root-level `state` created a false-green test and made every real terminal look failed.
+- Treat a valid unsatisfied wait as a created terminal that may need first-run user input. Reserve `failed` for create, transport, or malformed-response errors, and preserve only bounded error code/message fields.

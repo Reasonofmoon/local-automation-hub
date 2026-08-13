@@ -191,6 +191,59 @@ function Test-OrcaEnvelope {
     return Test-ObjectProperty -Object $Value -Name 'error'
 }
 
+function ConvertTo-SafeOrcaErrorText {
+    param(
+        [AllowNull()]
+        [object]$Value,
+
+        [Parameter(Mandatory)]
+        [string]$Operation,
+
+        [int]$ExitCode = 0
+    )
+
+    $code = ''
+    $message = ''
+    if ($null -ne $Value -and $Value -isnot [string] -and $Value -isnot [ValueType]) {
+        $codeValue = Get-ObjectProperty -Object $Value -Names @('code', 'errorCode')
+        $messageValue = Get-ObjectProperty -Object $Value -Names @('message', 'detail', 'reason')
+        if ($null -ne $codeValue -and ($codeValue -is [string] -or $codeValue -is [ValueType])) {
+            $code = [string]$codeValue
+        }
+        if ($null -ne $messageValue -and ($messageValue -is [string] -or $messageValue -is [ValueType])) {
+            $message = [string]$messageValue
+        }
+    } elseif ($null -ne $Value -and ($Value -is [string] -or $Value -is [ValueType])) {
+        $message = [string]$Value
+    }
+
+    # Keep only bounded, printable code/message fields; never serialize raw
+    # Orca error objects because they may carry terminal or credential data.
+    $code = [regex]::Replace($code, '[^\x20-\x7E]', '').Trim()
+    $message = [regex]::Replace($message, '[^\x20-\x7E]', ' ').Trim()
+    if ($code.Length -gt 120) {
+        $code = $code.Substring(0, 120)
+    }
+    if ($message.Length -gt 500) {
+        $message = $message.Substring(0, 500)
+    }
+
+    $parts = [System.Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($code)) {
+        $parts.Add("code=$code")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($message)) {
+        $parts.Add("message=$message")
+    }
+    if ($parts.Count -eq 0) {
+        if ($ExitCode -ne 0) {
+            return "Orca $Operation failed (exit code $ExitCode)."
+        }
+        return "Orca $Operation rejected the request."
+    }
+    return "Orca $Operation rejected the request: $($parts -join '; ')."
+}
+
 function ConvertFrom-OrcaFramedJson {
     param(
         [Parameter(Mandatory)][string]$Output,
@@ -277,17 +330,28 @@ function Invoke-OrcaJson {
     if ($process.TimedOut) {
         throw "Orca $Operation timed out."
     }
-    if ($process.ExitCode -ne 0) {
-        throw "Orca $Operation failed."
-    }
     if ([string]::IsNullOrWhiteSpace($process.Output)) {
+        if ($process.ExitCode -ne 0) {
+            throw (ConvertTo-SafeOrcaErrorText -Value $null -Operation $Operation -ExitCode $process.ExitCode)
+        }
         throw "Orca $Operation returned no JSON."
     }
 
-    $envelope = ConvertFrom-OrcaFramedJson -Output $process.Output -Operation $Operation
+    try {
+        $envelope = ConvertFrom-OrcaFramedJson -Output $process.Output -Operation $Operation
+    } catch {
+        if ($process.ExitCode -ne 0) {
+            throw (ConvertTo-SafeOrcaErrorText -Value $null -Operation $Operation -ExitCode $process.ExitCode)
+        }
+        throw
+    }
     $ok = Get-ObjectProperty -Object $envelope -Names @('ok')
-    if ($ok -isnot [bool] -or -not $ok) {
-        throw "Orca $Operation rejected the request. (ok=$ok; type=$($ok.GetType().FullName))"
+    if ($ok -isnot [bool]) {
+        throw "Orca $Operation returned an invalid ok flag."
+    }
+    if (-not $ok) {
+        $errorValue = Get-ObjectProperty -Object $envelope -Names @('error')
+        throw (ConvertTo-SafeOrcaErrorText -Value $errorValue -Operation $Operation -ExitCode $process.ExitCode)
     }
     $result = Get-ObjectProperty -Object $envelope -Names @('result')
     if ($null -eq $result) {
@@ -580,10 +644,18 @@ try {
                 'terminal', 'wait', '--terminal', $handle,
                 '--for', 'tui-idle', '--timeout-ms', [string]$ReadyTimeoutMs, '--json'
             ) -Operation "terminal wait $($agent.Title)"
-            $waitState = ([string](Get-ObjectProperty -Object $waitResult -Names @('state', 'status'))).Trim().ToLowerInvariant()
-            if ($waitState -ne 'tui-idle') {
-                throw 'Terminal did not reach tui-idle.'
+            $wait = Get-ObjectProperty -Object $waitResult -Names @('wait')
+            if ($null -eq $wait -or $wait -is [string] -or $wait -is [ValueType]) {
+                throw 'Orca terminal wait returned no wait result.'
             }
+            $satisfied = Get-ObjectProperty -Object $wait -Names @('satisfied')
+            if ($satisfied -isnot [bool]) {
+                throw 'Orca terminal wait returned an invalid satisfied flag.'
+            }
+            # A valid wait envelope with satisfied=false means the newly
+            # created CLI is alive but waiting for the user (for example,
+            # permissions, trust, or auth selection). It remains created;
+            # only create/transport errors belong in failed.
             $created.Add($agent.Title)
         } catch {
             $failed.Add([pscustomobject]@{ agent = $agent.Title; reason = $_.Exception.Message })

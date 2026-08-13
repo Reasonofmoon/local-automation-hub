@@ -241,8 +241,27 @@ switch ($operation) {
     }
     'terminal create' {
         $title = Get-ArgumentValue -Name '--title'
-        if ([string]$scenario.createFailureAgent -eq $title) {
-            [ordered]@{ id = 'fake-request-id'; ok = $false; error = 'fake create failure' } | ConvertTo-Json -Compress
+        if ([string]$scenario.nestedErrorAgent -eq $title) {
+            [ordered]@{
+                id = 'fake-request-id'
+                ok = $false
+                error = [ordered]@{
+                    code = [ordered]@{ secret = 'nested-code-secret' }
+                    message = [ordered]@{ secret = 'nested-message-secret' }
+                }
+            } | ConvertTo-Json -Compress
+            exit 1
+        } elseif ([string]$scenario.createFailureAgent -eq $title) {
+            [ordered]@{
+                id = 'fake-request-id'
+                ok = $false
+                error = [ordered]@{
+                    code = 'TERMINAL_CREATE_BLOCKED'
+                    message = 'permission denied while creating terminal'
+                    secret = 'raw-create-secret'
+                }
+            } | ConvertTo-Json -Compress
+            exit 1
         } else {
             $handle = "terminal-$($title.ToLowerInvariant())"
             switch ([string]$scenario.createResponseShape) {
@@ -263,9 +282,37 @@ switch ($operation) {
             "terminal-$waitFailureName"
         }
         if ([bool]$scenario.waitFailure -and ([string]::IsNullOrWhiteSpace($waitFailureHandle) -or $terminalHandle -eq $waitFailureHandle)) {
-            [ordered]@{ id = 'fake-request-id'; ok = $false; error = 'fake wait failure' } | ConvertTo-Json -Compress
+            [ordered]@{
+                id = 'fake-request-id'
+                ok = $false
+                error = [ordered]@{
+                    code = 'TERMINAL_WAIT_FAILED'
+                    message = 'wait request failed'
+                    secret = 'raw-wait-secret'
+                }
+            } | ConvertTo-Json -Compress
+            exit 1
+        } elseif ([bool]$scenario.waitPending) {
+            Send-Envelope ([ordered]@{
+                wait = [ordered]@{
+                    handle = $terminalHandle
+                    condition = 'tui-idle'
+                    satisfied = $false
+                    status = 'running'
+                    blockedReason = 'awaiting user input in the agent CLI'
+                }
+            })
+            exit 1
         } else {
-            Send-Envelope ([ordered]@{ state = 'tui-idle' })
+            Send-Envelope ([ordered]@{
+                wait = [ordered]@{
+                    handle = $terminalHandle
+                    condition = 'tui-idle'
+                    satisfied = $true
+                    status = 'running'
+                    exitCode = 0
+                }
+            })
         }
     }
     default {
@@ -356,8 +403,10 @@ try {
         repositoryRegistered = $false
         existingTerminal = $false
         createFailureAgent = ''
+        nestedErrorAgent = ''
         waitFailure = $false
         waitFailureAgent = ''
+        waitPending = $false
         stringOk = $false
         createResponseShape = 'flat'
         listCreatedTerminals = $false
@@ -518,8 +567,21 @@ try {
     Assert-Condition $partial.Result.success "partial agent failure keeps the workspace result usable (exit=$($partial.Process.ExitCode); stderr=$($partial.Process.Error); output=$($partial.Process.Output))"
     Assert-Equal 1 @($partial.Result.failed).Count 'one agent create failure is isolated'
     Assert-Equal 'Claude' $partial.Result.failed[0].agent 'failure identifies the affected agent'
+    Assert-Condition ($partial.Result.failed[0].reason -like '*TERMINAL_CREATE_BLOCKED*') 'create failure preserves the safe Orca error code'
+    Assert-Condition ($partial.Result.failed[0].reason -like '*permission denied while creating terminal*') 'create failure preserves the safe Orca error message'
+    Assert-Condition ($partial.Result.failed[0].reason -notlike '*raw-create-secret*') 'create failure does not expose raw error fields'
     Assert-Equal 3 @($partial.Result.created).Count 'later agents continue after one create failure'
 
+    $scenario.createFailureAgent = ''
+    $scenario.nestedErrorAgent = 'Codex'
+    $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
+    Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
+    $nestedError = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
+    Assert-Equal 1 @($nestedError.Result.failed).Count 'nested Orca error is isolated'
+    Assert-Condition ($nestedError.Result.failed[0].reason -notlike '*nested-code-secret*') 'nested error code values are not exposed'
+    Assert-Condition ($nestedError.Result.failed[0].reason -notlike '*nested-message-secret*') 'nested error message values are not exposed'
+
+    $scenario.nestedErrorAgent = ''
     $scenario.createFailureAgent = ''
     $scenario.waitFailure = $true
     $scenario.waitFailureAgent = 'Codex'
@@ -529,12 +591,24 @@ try {
     Assert-Condition $waitPartial.Result.success 'wait failure keeps the workspace result usable'
     Assert-Equal 1 @($waitPartial.Result.failed).Count 'one wait failure is isolated'
     Assert-Equal 'Codex' $waitPartial.Result.failed[0].agent 'wait failure identifies the affected agent'
+    Assert-Condition ($waitPartial.Result.failed[0].reason -like '*TERMINAL_WAIT_FAILED*') 'wait failure preserves the safe Orca error code'
+    Assert-Condition ($waitPartial.Result.failed[0].reason -like '*wait request failed*') 'wait failure preserves the safe Orca error message'
+    Assert-Condition ($waitPartial.Result.failed[0].reason -notlike '*raw-wait-secret*') 'wait failure does not expose raw error fields'
     Assert-Equal 3 @($waitPartial.Result.created).Count 'later agents are created after a wait failure'
     $waitCalls = @(Get-Content -LiteralPath $callLog | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-Equal 4 @($waitCalls | Where-Object { $_.command -eq 'terminal' -and $_.arguments -contains 'create' }).Count 'wait failure does not stop later terminal creation'
 
     $scenario.waitFailure = $false
     $scenario.waitFailureAgent = ''
+    $scenario.waitPending = $true
+    $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
+    Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
+    $waitPending = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
+    Assert-Condition $waitPending.Result.success 'user-input wait state keeps the workspace result usable'
+    Assert-Equal 4 @($waitPending.Result.created).Count 'user-input wait state still reports created terminals'
+    Assert-Equal 0 @($waitPending.Result.failed).Count 'user-input wait state is not reported as failed'
+
+    $scenario.waitPending = $false
     $scenario.stringOk = $true
     $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
     Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
