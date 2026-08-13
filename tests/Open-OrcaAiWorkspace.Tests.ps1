@@ -175,6 +175,28 @@ switch ($operation) {
                 state = 'live'
             })
         }
+        if ([bool]$scenario.listCreatedTerminals) {
+            $createdCalls = @(Get-Content -LiteralPath $env:FAKE_ORCA_CALL_LOG | ForEach-Object {
+                $_ | ConvertFrom-Json
+            } | Where-Object {
+                $_.command -eq 'terminal' -and $_.arguments -contains 'create'
+            })
+            foreach ($createdCall in $createdCalls) {
+                $titleIndex = [Array]::IndexOf([object[]]$createdCall.arguments, '--title')
+                $commandIndex = [Array]::IndexOf([object[]]$createdCall.arguments, '--command')
+                $worktreeIndex = [Array]::IndexOf([object[]]$createdCall.arguments, '--worktree')
+                $title = [string]$createdCall.arguments[$titleIndex + 1]
+                $command = [string]$createdCall.arguments[$commandIndex + 1]
+                $worktree = [string]$createdCall.arguments[$worktreeIndex + 1]
+                $terminals += [ordered]@{
+                    handle = "terminal-$($title.ToLowerInvariant())"
+                    title = $title
+                    command = $command
+                    worktree = $worktree
+                    state = 'live'
+                }
+            }
+        }
         Send-Envelope ([ordered]@{ terminals = $terminals })
     }
     'terminal create' {
@@ -182,7 +204,14 @@ switch ($operation) {
         if ([string]$scenario.createFailureAgent -eq $title) {
             [ordered]@{ ok = $false; error = 'fake create failure' } | ConvertTo-Json -Compress
         } else {
-            Send-Envelope ([ordered]@{ handle = "terminal-$($title.ToLowerInvariant())" })
+            $handle = "terminal-$($title.ToLowerInvariant())"
+            switch ([string]$scenario.createResponseShape) {
+                'terminal' { Send-Envelope ([ordered]@{ terminal = [ordered]@{ handle = $handle } }) }
+                'startupTerminal' { Send-Envelope ([ordered]@{ startupTerminal = [ordered]@{ handle = $handle } }) }
+                'none' { Send-Envelope ([ordered]@{ created = $true; workspace = [ordered]@{ id = 'worktree-sensitive-value' } }) }
+                'unrelatedIds' { Send-Envelope ([ordered]@{ id = 'repo-sensitive-value'; result = [ordered]@{ id = 'result-sensitive-value' }; worktree = [ordered]@{ id = 'worktree-sensitive-value' } }) }
+                default { Send-Envelope ([ordered]@{ handle = $handle }) }
+            }
         }
     }
     'terminal wait' {
@@ -290,6 +319,8 @@ try {
         waitFailure = $false
         waitFailureAgent = ''
         stringOk = $false
+        createResponseShape = 'flat'
+        listCreatedTerminals = $false
     }
     $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
     $basic = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
@@ -306,6 +337,42 @@ try {
     foreach ($call in $createCalls) {
         Assert-Condition ($call.arguments -contains "path:$repositoryRoot") 'terminal operation uses the exact path selector'
     }
+
+    foreach ($nestedShape in @('terminal', 'startupTerminal')) {
+        $scenario.createResponseShape = $nestedShape
+        $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
+        Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
+        $nested = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
+        Assert-Condition $nested.Result.success "$nestedShape create response succeeds"
+        Assert-Equal 4 @($nested.Result.created).Count "$nestedShape create response supplies all handles"
+        Assert-Equal 0 @($nested.Result.failed).Count "$nestedShape create response has no failures"
+    }
+
+    $scenario.createResponseShape = 'none'
+    $scenario.listCreatedTerminals = $true
+    $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
+    Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
+    $reconciled = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
+    Assert-Condition $reconciled.Result.success 'handle-less create responses reconcile through terminal list'
+    Assert-Equal 4 @($reconciled.Result.created).Count 'reconciled terminals remain classified as created'
+    Assert-Equal 0 @($reconciled.Result.reused).Count 'reconciled terminals are not misclassified as reused'
+    Assert-Equal 0 @($reconciled.Result.failed).Count 'reconciled terminals have no failures'
+    $reconcileCalls = @(Get-Content -LiteralPath $callLog | ForEach-Object { $_ | ConvertFrom-Json })
+    Assert-Equal 4 @($reconcileCalls | Where-Object { $_.command -eq 'terminal' -and $_.arguments -contains 'create' }).Count 'each agent is created only once during reconciliation'
+    Assert-Equal 5 @($reconcileCalls | Where-Object { $_.command -eq 'terminal' -and $_.arguments -contains 'list' }).Count 'each handle-less create performs one bounded reconciliation list'
+
+    $scenario.createResponseShape = 'unrelatedIds'
+    $scenario.listCreatedTerminals = $false
+    $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
+    Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
+    $unrelatedIds = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
+    Assert-Equal 4 @($unrelatedIds.Result.failed).Count 'unrelated repository and worktree IDs are not terminal handles'
+    Assert-Condition ($unrelatedIds.Result.failed[0].reason -like '*response keys: id, result, worktree*') 'missing handle failure reports response shape keys'
+    Assert-Condition ($unrelatedIds.Result.failed[0].reason -notlike '*sensitive-value*') 'missing handle failure does not expose response values'
+    $unrelatedCalls = @(Get-Content -LiteralPath $callLog | ForEach-Object { $_ | ConvertFrom-Json })
+    Assert-Equal 0 @($unrelatedCalls | Where-Object { $_.command -eq 'terminal' -and $_.arguments -contains 'wait' }).Count 'unrelated IDs are never passed to terminal wait'
+
+    $scenario.createResponseShape = 'flat'
 
     Remove-Item -LiteralPath $callLog -Force
     $nonGitResult = Invoke-Adapter -SelectedPath $nonGitPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths

@@ -9,3 +9,8 @@
 - A UI error ending in `[line 256]` did not identify the AutoHotkey source line 256. The adapter appends PowerShell `InvocationInfo.ScriptLineNumber`, and line 256 in that script was a strict-mode property lookup.
 - Reproduce through the real process boundary and capture the original result before editing the line that happens to share the same number.
 - Under PowerShell strict mode, do not read `$Object.PSObject.Properties.Name` when the property collection may be empty. Enumerate `PSPropertyInfo` objects and compare each `.Name` instead.
+- Treat successful create responses as potentially asynchronous or
+  schema-nested: extract handles only from semantically known terminal
+  containers, then reconcile through an exact list selector before retrying or
+  failing. Never treat generic repository/worktree/result IDs as terminal
+  handles, and keep schema diagnostics to key names rather than values.

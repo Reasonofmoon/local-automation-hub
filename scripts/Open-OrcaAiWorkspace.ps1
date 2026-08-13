@@ -346,11 +346,42 @@ function Find-MatchingTerminal {
 
 function Get-TerminalHandle {
     param([Parameter(Mandatory)][object]$Terminal)
-    $handle = Get-ObjectProperty -Object $Terminal -Names @('handle', 'id', 'terminalId')
-    if ($null -eq $handle -or [string]::IsNullOrWhiteSpace([string]$handle)) {
-        return $null
+
+    $handle = Get-ObjectProperty -Object $Terminal -Names @('handle', 'terminalId')
+    if ($null -ne $handle -and -not [string]::IsNullOrWhiteSpace([string]$handle)) {
+        return [string]$handle
     }
-    return [string]$handle
+
+    foreach ($containerName in @('terminal', 'startupTerminal', 'session', 'result')) {
+        $container = Get-ObjectProperty -Object $Terminal -Names @($containerName)
+        if ($null -eq $container -or $container -is [string] -or $container -is [ValueType]) {
+            continue
+        }
+        $nestedHandleNames = if ($containerName -eq 'result') {
+            @('handle', 'terminalId')
+        } else {
+            @('handle', 'terminalId', 'id')
+        }
+        $nestedHandle = Get-ObjectProperty -Object $container -Names $nestedHandleNames
+        if ($null -ne $nestedHandle -and -not [string]::IsNullOrWhiteSpace([string]$nestedHandle)) {
+            return [string]$nestedHandle
+        }
+        $recursiveHandle = Get-TerminalHandle -Terminal $container
+        if ($null -ne $recursiveHandle) {
+            return $recursiveHandle
+        }
+    }
+    return $null
+}
+
+function Get-ResponseShapeKeys {
+    param([Parameter(Mandatory)][object]$Response)
+
+    $keys = @($Response.PSObject.Properties | ForEach-Object { $_.Name })
+    if ($keys.Count -eq 0) {
+        return '<none>'
+    }
+    return ($keys -join ', ')
 }
 
 $summary = [ordered]@{
@@ -428,7 +459,19 @@ try {
             ) -Operation "terminal create $($agent.Title)"
             $handle = Get-TerminalHandle -Terminal $createdResult
             if ($null -eq $handle) {
-                throw 'Orca did not return a terminal handle.'
+                $reconciledList = Invoke-OrcaJson -Arguments @(
+                    'terminal', 'list', '--worktree', $selector, '--json'
+                ) -Operation "terminal list after create $($agent.Title)"
+                $reconciledTerminals = @(Get-ObjectProperty -Object $reconciledList -Names @('terminals'))
+                $reconciled = Find-MatchingTerminal -Terminals $reconciledTerminals -Title $agent.Title `
+                    -Command $agent.Command -Selector $selector -RepositoryRoot $repositoryRoot
+                if ($null -ne $reconciled) {
+                    $handle = Get-TerminalHandle -Terminal $reconciled
+                }
+            }
+            if ($null -eq $handle) {
+                $shapeKeys = Get-ResponseShapeKeys -Response $createdResult
+                throw "Orca created the terminal but no terminal handle could be reconciled (response keys: $shapeKeys)."
             }
             $waitResult = Invoke-OrcaJson -Arguments @(
                 'terminal', 'wait', '--terminal', $handle,
