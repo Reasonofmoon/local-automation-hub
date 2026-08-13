@@ -152,21 +152,6 @@ function Get-ObjectProperty {
     return $null
 }
 
-function Get-ErrorText {
-    param(
-        [AllowNull()]
-        [object]$Object,
-
-        [string]$Fallback = 'operation failed'
-    )
-
-    $value = Get-ObjectProperty -Object $Object -Names @('error', 'message', 'reason', 'code')
-    if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) {
-        return $Fallback
-    }
-    return ([string]$value).Trim()
-}
-
 function Invoke-OrcaJson {
     param(
         [Parameter(Mandatory)]
@@ -196,11 +181,7 @@ function Invoke-OrcaJson {
         throw "Orca $Operation returned invalid JSON."
     }
     $ok = Get-ObjectProperty -Object $envelope -Names @('ok')
-    if ($ok -is [bool]) {
-        if (-not $ok) {
-            throw "Orca $Operation rejected the request. (ok=$ok; type=$($ok.GetType().FullName))"
-        }
-    } elseif ([string]$ok -ne 'true') {
+    if ($ok -isnot [bool] -or -not $ok) {
         throw "Orca $Operation rejected the request. (ok=$ok; type=$($ok.GetType().FullName))"
     }
     $result = Get-ObjectProperty -Object $envelope -Names @('result')
@@ -281,11 +262,24 @@ function Resolve-AgentExecutable {
         return $null
     }
 
-    $commandInfo = Get-Command -Name $Command -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $commandInfo) {
+    $whereCommand = Join-Path ([Environment]::GetFolderPath('System')) 'where.exe'
+    if (-not (Test-Path -LiteralPath $whereCommand -PathType Leaf)) {
+        $whereCommand = 'where.exe'
+    }
+    $lookup = Invoke-BoundedProcess -FilePath $whereCommand -Arguments @($Command) -TimeoutMs $ReadyTimeoutMs
+    if (-not $lookup.Started -or $lookup.TimedOut -or $lookup.ExitCode -ne 0) {
         return $null
     }
-    return [string]$commandInfo.Source
+    foreach ($line in ([string]$lookup.Output -split "`r?`n")) {
+        $candidate = $line.Trim()
+        if ([string]::IsNullOrWhiteSpace($candidate)) {
+            continue
+        }
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+    return $null
 }
 
 function Test-LiveTerminal {

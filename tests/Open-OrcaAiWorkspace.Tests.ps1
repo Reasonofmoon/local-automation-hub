@@ -134,7 +134,10 @@ function Get-ArgumentValue {
 
 function Send-Envelope {
     param($Result)
-    $envelope = [ordered]@{ ok = $true; result = $Result }
+    $envelope = [ordered]@{
+        ok = if ([bool]$scenario.stringOk) { 'true' } else { $true }
+        result = $Result
+    }
     [Console]::Error.WriteLine(('FAKE_ENVELOPE=' + ($envelope | ConvertTo-Json -Compress -Depth 12)))
     $envelope | ConvertTo-Json -Compress -Depth 12
 }
@@ -183,7 +186,14 @@ switch ($operation) {
         }
     }
     'terminal wait' {
-        if ([bool]$scenario.waitFailure) {
+        $terminalHandle = Get-ArgumentValue -Name '--terminal'
+        $waitFailureHandle = if ([string]::IsNullOrWhiteSpace([string]$scenario.waitFailureAgent)) {
+            ''
+        } else {
+            $waitFailureName = ([string]$scenario.waitFailureAgent).ToLowerInvariant()
+            "terminal-$waitFailureName"
+        }
+        if ([bool]$scenario.waitFailure -and ([string]::IsNullOrWhiteSpace($waitFailureHandle) -or $terminalHandle -eq $waitFailureHandle)) {
             [ordered]@{ ok = $false; error = 'fake wait failure' } | ConvertTo-Json -Compress
         } else {
             Send-Envelope ([ordered]@{ state = 'tui-idle' })
@@ -278,6 +288,8 @@ try {
         existingTerminal = $false
         createFailureAgent = ''
         waitFailure = $false
+        waitFailureAgent = ''
+        stringOk = $false
     }
     $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
     $basic = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
@@ -344,6 +356,42 @@ try {
     Assert-Equal 1 @($partial.Result.failed).Count 'one agent create failure is isolated'
     Assert-Equal 'Claude' $partial.Result.failed[0].agent 'failure identifies the affected agent'
     Assert-Equal 3 @($partial.Result.created).Count 'later agents continue after one create failure'
+
+    $scenario.createFailureAgent = ''
+    $scenario.waitFailure = $true
+    $scenario.waitFailureAgent = 'Codex'
+    $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
+    Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
+    $waitPartial = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
+    Assert-Condition $waitPartial.Result.success 'wait failure keeps the workspace result usable'
+    Assert-Equal 1 @($waitPartial.Result.failed).Count 'one wait failure is isolated'
+    Assert-Equal 'Codex' $waitPartial.Result.failed[0].agent 'wait failure identifies the affected agent'
+    Assert-Equal 3 @($waitPartial.Result.created).Count 'later agents are created after a wait failure'
+    $waitCalls = @(Get-Content -LiteralPath $callLog | ForEach-Object { $_ | ConvertFrom-Json })
+    Assert-Equal 4 @($waitCalls | Where-Object { $_.command -eq 'terminal' -and $_.arguments -contains 'create' }).Count 'wait failure does not stop later terminal creation'
+
+    $scenario.waitFailure = $false
+    $scenario.waitFailureAgent = ''
+    $scenario.stringOk = $true
+    $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
+    Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
+    $stringEnvelope = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
+    Assert-Condition (-not $stringEnvelope.Result.success) 'string true envelope is rejected'
+    Assert-Equal 1 @(Get-Content -LiteralPath $callLog | ForEach-Object { $_ | ConvertFrom-Json }).Count 'string envelope rejection stops after status'
+
+    $lookupFailurePaths = @{
+        codex = (Join-Path $fakeAgentRoot 'missing-codex.cmd')
+        claude = (Join-Path $fakeAgentRoot 'missing-claude.cmd')
+        grok = (Join-Path $fakeAgentRoot 'missing-grok.cmd')
+        gemini = (Join-Path $fakeAgentRoot 'missing-gemini.cmd')
+    }
+    $scenario.stringOk = $false
+    $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
+    Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
+    $lookupFailure = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $lookupFailurePaths
+    Assert-Condition $lookupFailure.Result.success 'command lookup failure keeps workspace result usable'
+    Assert-Equal 4 @($lookupFailure.Result.skipped).Count 'lookup failures map every agent to skipped'
+    Assert-Equal 0 @(Get-Content -LiteralPath $callLog | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.command -eq 'terminal' -and $_.arguments -contains 'create' }).Count 'lookup failures do not launch agent terminals'
 
     Write-Host 'PASS: Orca AI workspace adapter'
 } finally {
