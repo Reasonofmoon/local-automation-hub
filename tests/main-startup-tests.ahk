@@ -16,6 +16,14 @@ AssertEqual("", startupError, "headless startup composition registers built-in c
 if (startupError = "") {
     startupRegistry := startupHub["registry"]
     AssertTrue(startupRegistry.Search("workspace").Length > 0, "startup registers workspace commands")
+    startupHasOrcaCommand := false
+    for _, startupCommand in startupRegistry.All() {
+        if (startupCommand["id"] = "workspace.ai-development") {
+            startupHasOrcaCommand := true
+            break
+        }
+    }
+    AssertTrue(startupHasOrcaCommand, "headless startup registers workspace.ai-development")
     AssertTrue(startupRegistry.Search("window").Length > 0, "startup registers window commands")
     AssertTrue(startupRegistry.Search("organize").Length > 0, "startup registers file commands")
 

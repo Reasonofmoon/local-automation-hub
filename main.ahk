@@ -8,6 +8,7 @@
 #Include src\core\Palette.ahk
 #Include src\modules\Snippets.ahk
 #Include src\modules\Workspaces.ahk
+#Include src\modules\OrcaWorkspace.ahk
 #Include src\modules\WindowManager.ahk
 #Include src\system\ExplorerSelection.ahk
 #Include src\modules\FileOrganizer.ahk
@@ -62,6 +63,14 @@ InitializeHub(rootDir, registerHotkeys := true) {
         snippets := SnippetService(config["Snippets"], Win32InputAdapter(), context)
         RegisterSnippetCommands(registry, snippets)
     }
+    aiWorkspaceLauncher := OrcaWorkspaceService(
+        Win32OrcaFolderPicker(),
+        Win32OrcaProcessAdapter(),
+        Win32OrcaWorkspacePresenter(),
+        rootDir "\scripts\Open-OrcaAiWorkspace.ps1",
+        context
+    )
+    RegisterOrcaWorkspaceCommand(registry, aiWorkspaceLauncher)
     palette := CommandPalette(registry, context)
 
     if registerHotkeys

@@ -112,6 +112,9 @@ if (-not $Only -or $requested -contains 'file-organizer') {
 if (-not $Only -or $requested -contains 'credential') {
     $moduleFiles += Join-Path $PSScriptRoot '..\src\modules\CredentialStore.ahk'
 }
+if (-not $Only -or $requested -contains 'orca-workspace') {
+    $moduleFiles += Join-Path $PSScriptRoot '..\src\modules\OrcaWorkspace.ahk'
+}
 
 $failures = 0
 foreach ($module in $moduleFiles) {
