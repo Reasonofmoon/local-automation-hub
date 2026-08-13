@@ -52,11 +52,43 @@ orchestrator → builder → qa-reviewer → orchestrator
 
 구현 계획에서 실제 설치 경로와 지원 옵션을 확인한 명령만 사용한다. 최소 검증은 AutoHotkey v2 구문 검사, PowerShell 파서 검사, 설정 충돌 검사, 임시 파일 시나리오다. TypeScript 소스가 추가되는 경우에만 `npx tsc --noEmit`을 실행한다.
 
+## Orca AI development workspace 기록
+
+`workspace.ai-development`는 중간 위험도(`medium`)의 독립 팔레트 명령이다.
+매 실행마다 네이티브 폴더 선택기를 열고, 선택한 기존 Git checkout을
+`git -C <path> rev-parse --show-toplevel`로 확인한 뒤 `path:<root>` selector로
+Orca에 전달한다. `runtime.state=ready`와 `runtime.reachable=true`가 모두
+확인되지 않으면 repository 등록이나 터미널 생성 없이 중단한다.
+
+준비 대상은 고정된 네 가지다: `Codex/codex`, `Claude/claude`, `Grok/grok`,
+`Gemini/gemini`. workspace·제목·명령 identity가 확인된 live 터미널만
+재사용하며, 그 외에는 CLI를 실행하고 `tui-idle`까지 bounded wait를 한다.
+결과는 `created`, `reused`, `skipped`, `failed`로 집계한다. CLI 누락이나 한
+터미널의 create/wait 실패는 해당 항목에 격리한다.
+
+이 경로는 clone, branch, Git worktree, prompt 전송, 기존 터미널 종료/교체를
+수행하지 않는다. `[Workspace.development]`는 기존의 설정 가능한
+app/folder/URL 샘플이고 Orca workflow가 아니므로 두 명령을 문서와 QA에서
+구분한다. 자동 검증은 임시 Git repository와 fake Orca/CLI만 사용한다.
+
+Task 3의 통합 검증 산출물은
+[`runs/2026-08-13-orca-ai-development-workspace/verification.md`](runs/2026-08-13-orca-ai-development-workspace/verification.md)에
+기록한다. 해당 보고서는 명령별 현지 ISO-8601 timestamp, exit code, pass 수,
+whitespace/금지 명령 검색, AutoHotkey PID audit, read-only Orca readiness,
+그리고 실제 Orca UI를 수행하지 않은 이유를 분리해 적는다. 사용자가 이번
+턴에 disposable checkout을 선택하지 않았으므로 수동 QA는 사용자 소유로
+남긴다.
+
+Minor: 이 저장소의 지원 실행 파일과 이번 자동 검증은
+`AutoHotkey64.exe`(x64) 기준이다. x86 AutoHotkey runtime은 별도로 검증하지
+않았다.
+
 ## 변경 이력
 
 | 날짜 | 대상 | 변경 | 이유 |
 | --- | --- | --- | --- |
 | 2026-08-12 | 전체 | 초기 하네스 설계 | 통합 단축키 허브 신설 |
+| 2026-08-13 | `workspace.ai-development` | Orca AI workspace 계약·자동 검증·수동 QA 경계 기록 | 기존 checkout 재사용과 무프롬프트 안전 경계 명시 |
 
 ## Task 9 운영 표면
 

@@ -33,6 +33,36 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Register-Credentia
 - `files.organize-selected`: Explorer에서 선택한 일반 파일을 미리 보고 확인한 뒤 `YYYY\MM\YYYY-MM-DD_name.ext`로 이동합니다.
 - `files.undo-last-organize`: 마지막으로 성공한 파일 이동 매핑만 한 번 되돌립니다. 원래 위치가 사용 중이면 중단합니다.
 
+## Orca AI development workspace
+
+`workspace.ai-development`는 기존 Git checkout 하나를 Orca workspace로 열고
+Codex, Claude, Grok, Gemini CLI 터미널을 준비합니다. 이 명령은 설정 파일의
+`[Workspace.development]` 샘플과 별개입니다. `workspace.development`는
+`app|...`, `folder|...`, `url|...` 항목을 묶어 실행하는 설정 가능한 일반
+workspace 예제이며 Orca를 열거나 AI 터미널을 만들지 않습니다.
+
+처음 사용할 때는 다음 순서로 진행합니다.
+
+1. Orca를 시작하고 `orca status --json`의 `runtime.state`가 `ready`,
+   `runtime.reachable`이 `true`인지 확인합니다. 준비되지 않은 runtime이면
+   대상 repository나 터미널을 만들지 않고 오류를 표시합니다.
+2. `CapsLock + Space`로 팔레트를 엽니다.
+3. `workspace.development`가 아니라 `workspace.ai-development`를 실행합니다.
+4. 폴더 선택기에서 이미 존재하는 Git checkout을 선택합니다. 하위 폴더를
+   선택해도 Git root를 찾아 그 경로를 그대로 사용합니다. Git이 아닌 폴더는
+   Orca 호출 전에 거부됩니다.
+5. 결과 대화상자에서 repository 경로와 `Created`, `Reused`, `Skipped`,
+   `Failed` 목록을 확인합니다. 설치된 CLI마다 별도 터미널이 열리고 입력을
+   기다리는지 확인한 뒤 작업을 시작하세요.
+
+`Created`는 새로 준비한 터미널, `Reused`는 workspace·제목·명령이 확인된
+기존 live 터미널, `Skipped`는 CLI가 설치되지 않아 건너뛴 항목,
+`Failed`는 특정 터미널의 생성 또는 준비 대기 실패입니다. 한 에이전트의
+실패는 다른 에이전트 준비를 중단시키지 않습니다. 이 흐름은 선택한 기존
+checkout을 `path:<root>`로 사용하며 clone, branch, Git worktree를 만들거나
+기존 터미널을 닫지 않습니다. 어떤 CLI에도 prompt를 자동으로 보내지 않으므로
+각 터미널에서 사용자가 직접 입력해야 합니다.
+
 ## 시작프로그램 등록과 복구
 
 자동 검증은 항상 조회만 수행합니다.
