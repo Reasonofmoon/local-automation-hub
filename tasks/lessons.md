@@ -14,3 +14,9 @@
   containers, then reconcile through an exact list selector before retrying or
   failing. Never treat generic repository/worktree/result IDs as terminal
   handles, and keep schema diagnostics to key names rather than values.
+
+## 2026-08-13 - Treat CLI JSON as a framed protocol
+
+- A successful CLI can write a harmless notice before its machine-readable response; parsing all stdout as one JSON document couples the adapter to incidental framing.
+- Extract only bounded line-delimited candidates, then require exactly one top-level protocol envelope with `id`, Boolean `ok`, and the matching `result` or `error` member. Nested JSON-shaped log lines are not responses.
+- Framing errors must identify the operation and report only safe structure metadata such as nonempty line count, candidate count, and single/multi-line shape. Never echo stdout, tokens, terminal contents, or envelope values.

@@ -135,11 +135,27 @@ function Get-ArgumentValue {
 function Send-Envelope {
     param($Result)
     $envelope = [ordered]@{
+        id = 'fake-request-id'
         ok = if ([bool]$scenario.stringOk) { 'true' } else { $true }
         result = $Result
     }
     [Console]::Error.WriteLine(('FAKE_ENVELOPE=' + ($envelope | ConvertTo-Json -Compress -Depth 12)))
+    if ([string]$scenario.framedOutputOperation -eq $operation) {
+        Write-Output 'Orca CLI notice: using the active runtime.'
+        Write-Output '{"result":{"id":"nested-log-value"}}'
+    }
+    if ([string]$scenario.duplicateEnvelopeOperation -eq $operation) {
+        [ordered]@{
+            id = 'duplicate-request-id'
+            ok = $true
+            result = [ordered]@{ ignored = $true }
+        } | ConvertTo-Json -Compress -Depth 12
+    }
     $envelope | ConvertTo-Json -Compress -Depth 12
+    if ([string]$scenario.framedOutputOperation -eq $operation) {
+        Write-Output ''
+        Write-Output '   '
+    }
 }
 
 $operation = if ($CliArguments.Count -gt 1 -and @('repo', 'terminal') -contains $CliArguments[0]) {
@@ -202,7 +218,7 @@ switch ($operation) {
     'terminal create' {
         $title = Get-ArgumentValue -Name '--title'
         if ([string]$scenario.createFailureAgent -eq $title) {
-            [ordered]@{ ok = $false; error = 'fake create failure' } | ConvertTo-Json -Compress
+            [ordered]@{ id = 'fake-request-id'; ok = $false; error = 'fake create failure' } | ConvertTo-Json -Compress
         } else {
             $handle = "terminal-$($title.ToLowerInvariant())"
             switch ([string]$scenario.createResponseShape) {
@@ -223,13 +239,13 @@ switch ($operation) {
             "terminal-$waitFailureName"
         }
         if ([bool]$scenario.waitFailure -and ([string]::IsNullOrWhiteSpace($waitFailureHandle) -or $terminalHandle -eq $waitFailureHandle)) {
-            [ordered]@{ ok = $false; error = 'fake wait failure' } | ConvertTo-Json -Compress
+            [ordered]@{ id = 'fake-request-id'; ok = $false; error = 'fake wait failure' } | ConvertTo-Json -Compress
         } else {
             Send-Envelope ([ordered]@{ state = 'tui-idle' })
         }
     }
     default {
-        [ordered]@{ ok = $false; error = "unexpected operation $operation" } | ConvertTo-Json -Compress
+        [ordered]@{ id = 'fake-request-id'; ok = $false; error = "unexpected operation $operation" } | ConvertTo-Json -Compress
     }
 }
 '@
@@ -321,6 +337,8 @@ try {
         stringOk = $false
         createResponseShape = 'flat'
         listCreatedTerminals = $false
+        framedOutputOperation = ''
+        duplicateEnvelopeOperation = ''
     }
     $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
     $basic = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
@@ -337,6 +355,28 @@ try {
     foreach ($call in $createCalls) {
         Assert-Condition ($call.arguments -contains "path:$repositoryRoot") 'terminal operation uses the exact path selector'
     }
+
+    $scenario.repositoryRegistered = $true
+    $scenario.framedOutputOperation = 'terminal list'
+    $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
+    Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
+    $framedOutput = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
+    Assert-Condition $framedOutput.Result.success 'terminal list accepts a harmless preamble before one valid Orca envelope'
+    Assert-Equal 4 @($framedOutput.Result.created).Count 'framed terminal list still creates all missing terminals'
+
+    $scenario.duplicateEnvelopeOperation = 'terminal list'
+    $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
+    Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
+    $ambiguousOutput = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
+    Assert-Condition (-not $ambiguousOutput.Result.success) 'multiple Orca envelopes are rejected as ambiguous'
+    Assert-Condition ($ambiguousOutput.Result.error -like 'Orca terminal list returned unusable JSON framing*') 'ambiguous framing error identifies the operation'
+    Assert-Condition ($ambiguousOutput.Result.error -like '*candidates=2*') 'ambiguous framing error reports only safe candidate metadata'
+    Assert-Condition ($ambiguousOutput.Result.error -notlike '*nested-log-value*') 'ambiguous framing error does not expose nested log values'
+    Assert-Condition ($ambiguousOutput.Result.error -notlike '*duplicate-request-id*') 'ambiguous framing error does not expose envelope values'
+
+    $scenario.framedOutputOperation = ''
+    $scenario.duplicateEnvelopeOperation = ''
+    $scenario.repositoryRegistered = $false
 
     foreach ($nestedShape in @('terminal', 'startupTerminal')) {
         $scenario.createResponseShape = $nestedShape

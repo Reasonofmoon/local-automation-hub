@@ -154,6 +154,90 @@ function Get-ObjectProperty {
     return $null
 }
 
+function Test-ObjectProperty {
+    param(
+        [AllowNull()]
+        [object]$Object,
+
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    if ($null -eq $Object) {
+        return $false
+    }
+    foreach ($property in $Object.PSObject.Properties) {
+        if ($property.Name -eq $Name) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Test-OrcaEnvelope {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value -or $Value -is [string] -or $Value -is [ValueType] -or $Value -is [array]) {
+        return $false
+    }
+    $id = Get-ObjectProperty -Object $Value -Names @('id')
+    $ok = Get-ObjectProperty -Object $Value -Names @('ok')
+    if ([string]::IsNullOrWhiteSpace([string]$id) -or $ok -isnot [bool]) {
+        return $false
+    }
+    if ($ok) {
+        return Test-ObjectProperty -Object $Value -Name 'result'
+    }
+    return Test-ObjectProperty -Object $Value -Name 'error'
+}
+
+function ConvertFrom-OrcaFramedJson {
+    param(
+        [Parameter(Mandatory)][string]$Output,
+        [Parameter(Mandatory)][string]$Operation
+    )
+
+    $maxCharacters = 1048576
+    $maxLines = 512
+    $allLines = @($Output -split "`r?`n")
+    $nonEmptyLines = @($allLines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($Output.Length -gt $maxCharacters -or $nonEmptyLines.Count -gt $maxLines) {
+        throw "Orca $Operation returned unusable JSON framing (lines=$($nonEmptyLines.Count); candidates=0; shape=over-limit)."
+    }
+
+    $candidateTexts = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($line in $nonEmptyLines) {
+        $trimmedLine = $line.Trim()
+        if ($trimmedLine.StartsWith('{') -and $trimmedLine.EndsWith('}')) {
+            [void]$candidateTexts.Add($trimmedLine)
+        }
+    }
+    for ($index = $nonEmptyLines.Count - 1; $index -ge 0; $index--) {
+        if (-not $nonEmptyLines[$index].TrimStart().StartsWith('{')) {
+            continue
+        }
+        $suffix = [string]::Join("`n", $nonEmptyLines[$index..($nonEmptyLines.Count - 1)]).Trim()
+        [void]$candidateTexts.Add($suffix)
+    }
+
+    $envelopes = [System.Collections.Generic.List[object]]::new()
+    foreach ($candidateText in $candidateTexts) {
+        try {
+            $candidate = $candidateText | ConvertFrom-Json
+        } catch {
+            continue
+        }
+        if (Test-OrcaEnvelope -Value $candidate) {
+            $envelopes.Add($candidate)
+        }
+    }
+    if ($envelopes.Count -ne 1) {
+        $shape = if ($nonEmptyLines.Count -eq 1) { 'single-line' } else { 'multi-line' }
+        throw "Orca $Operation returned unusable JSON framing (lines=$($nonEmptyLines.Count); candidates=$($envelopes.Count); shape=$shape)."
+    }
+    return $envelopes[0]
+}
+
 function Invoke-OrcaJson {
     param(
         [Parameter(Mandatory)]
@@ -177,11 +261,7 @@ function Invoke-OrcaJson {
         throw "Orca $Operation returned no JSON."
     }
 
-    try {
-        $envelope = $process.Output.Trim() | ConvertFrom-Json
-    } catch {
-        throw "Orca $Operation returned invalid JSON."
-    }
+    $envelope = ConvertFrom-OrcaFramedJson -Output $process.Output -Operation $Operation
     $ok = Get-ObjectProperty -Object $envelope -Names @('ok')
     if ($ok -isnot [bool] -or -not $ok) {
         throw "Orca $Operation rejected the request. (ok=$ok; type=$($ok.GetType().FullName))"
