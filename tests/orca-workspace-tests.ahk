@@ -85,6 +85,22 @@ class FakeOrcaCommandRegistry {
     }
 }
 
+AssertThrowsContains(callback, expectedText, message := "expected an exception containing text") {
+    global TestFailures
+    threw := false
+    matched := false
+    try {
+        callback()
+    } catch as caughtError {
+        threw := true
+        matched := InStr(String(caughtError.Message), String(expectedText)) > 0
+    }
+    if !threw || !matched {
+        TestFailures += 1
+        FileAppend("FAIL: " message "`n", "*")
+    }
+}
+
 selectedPath := "C:\\projects\\lesson-platform"
 picker := FakeOrcaFolderPicker(selectedPath)
 processAdapter := FakeOrcaProcessAdapter(Map(
@@ -173,5 +189,53 @@ RegisterOrcaWorkspaceCommand(registry, service)
 AssertEqual(1, registry.commands.Length, "registers one Orca command")
 AssertEqual("workspace.ai-development", registry.commands[1]["id"], "uses exact Orca command id")
 AssertEqual("medium", registry.commands[1]["risk"], "registers medium command risk")
+
+; Contract tests exercise the real Win32 process boundary.  The fake scripts
+; are harmless PowerShell processes and never invoke Orca or an agent CLI.
+adapterTestRoot := A_Temp "\orca-adapter-contract-" A_TickCount "-" Random(100000, 999999)
+DirCreate(adapterTestRoot)
+successScript := adapterTestRoot "\fake adapter success script.ps1"
+successScriptBody := "param([string]$SelectedPath, [int]$ReadyTimeoutMs)`n"
+    . "[Console]::Error.WriteLine('adapter-stderr-ignored')`n"
+    . "[ordered]@{ success = $true; selectedPath = $SelectedPath; readyTimeoutMs = $ReadyTimeoutMs } | ConvertTo-Json -Compress`n"
+FileAppend(successScriptBody, successScript, "UTF-8")
+selectedContractPath := adapterTestRoot "\selected path & spaces [x]; $HOME"
+contractAdapter := Win32OrcaProcessAdapter(1257, "powershell.exe")
+contractResult := contractAdapter.Open(successScript, selectedContractPath)
+AssertTrue(contractResult["success"], "Win32 adapter captures stdout JSON")
+AssertEqual(selectedContractPath, contractResult["selectedPath"], "selected path arrives as one exact argv value")
+AssertEqual(1257, contractResult["readyTimeoutMs"], "same ReadyTimeoutMs is forwarded to PowerShell")
+
+failureScript := adapterTestRoot "\fake adapter failure script.ps1"
+failureScriptBody := "param([string]$SelectedPath, [int]$ReadyTimeoutMs)`n"
+    . "[Console]::Error.WriteLine('adapter-stderr-marker')`n"
+    . "exit 7`n"
+FileAppend(failureScriptBody, failureScript, "UTF-8")
+AssertThrowsContains(
+    () => contractAdapter.Open(failureScript, selectedContractPath),
+    "adapter-stderr-marker",
+    "nonzero exit maps captured stderr into adapter failure"
+)
+AssertThrowsContains(
+    () => contractAdapter.Open(failureScript, selectedContractPath),
+    "exited with code 7",
+    "nonzero exit maps the exact process exit code"
+)
+
+timeoutMarker := adapterTestRoot "\timeout marker.txt"
+timeoutScript := adapterTestRoot "\fake adapter timeout script.ps1"
+timeoutScriptBody := "param([string]$SelectedPath, [int]$ReadyTimeoutMs)`n"
+    . "Start-Sleep -Milliseconds 3000`n"
+    . "Set-Content -LiteralPath $SelectedPath -Value 'late'`n"
+FileAppend(timeoutScriptBody, timeoutScript, "UTF-8")
+timeoutAdapter := Win32OrcaProcessAdapter(100, "powershell.exe")
+AssertThrowsContains(
+    () => timeoutAdapter.Open(timeoutScript, timeoutMarker),
+    "timed out",
+    "timeout reports a bounded owned-process failure"
+)
+Sleep(500)
+AssertFalse(FileExist(timeoutMarker), "timeout terminates the owned process before its late write")
+try DirDelete(adapterTestRoot, true)
 
 ExitWithTestResult()

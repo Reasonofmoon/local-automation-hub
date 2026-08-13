@@ -69,22 +69,25 @@ class Win32OrcaProcessAdapter {
         if (selectedPath = "")
             throw Error("Orca workspace selection is empty")
 
-        outputPath := A_Temp "\\local-automation-hub-orca-" A_TickCount "-" Random(100000, 999999) ".json"
-        command := OrcaBuildPowerShellCommand(this.powershellPath, scriptPath, selectedPath, outputPath)
-        try {
-            processId := 0
-            Run(command, , "Hide", &processId)
-            if !OrcaWaitForProcess(processId, this.readyTimeoutMs)
-                throw Error("Orca workspace adapter timed out")
-            if !FileExist(outputPath)
-                throw Error("Orca workspace adapter returned no JSON")
-            rawResult := FileRead(outputPath, "UTF-8")
-            if (Trim(rawResult) = "")
-                throw Error("Orca workspace adapter returned no JSON")
-            return OrcaJsonParse(rawResult)
-        } finally {
-            try FileDelete(outputPath)
+        arguments := [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy", "Bypass",
+            "-File", scriptPath,
+            "-SelectedPath", selectedPath,
+            "-ReadyTimeoutMs", String(this.readyTimeoutMs)
+        ]
+        processResult := OrcaRunProcess(this.powershellPath, arguments, this.readyTimeoutMs)
+        if processResult["timedOut"]
+            throw Error("Orca workspace adapter timed out")
+        if processResult["exitCode"] != 0 {
+            detail := Trim(String(processResult["stderr"]))
+            throw Error("Orca workspace adapter exited with code " processResult["exitCode"] (detail = "" ? "" : ": " detail))
         }
+        rawResult := Trim(String(processResult["stdout"]))
+        if (rawResult = "")
+            throw Error("Orca workspace adapter returned no JSON" (Trim(String(processResult["stderr"])) = "" ? "" : ": " Trim(String(processResult["stderr"]))))
+        return OrcaJsonParse(rawResult)
     }
 }
 
@@ -184,37 +187,144 @@ OrcaJoinLines(lines) {
     return result
 }
 
-OrcaBuildPowerShellCommand(powershellPath, scriptPath, selectedPath, outputPath) {
-    arguments := [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy", "Bypass",
-        "-File", scriptPath,
-        "-SelectedPath", selectedPath,
-        "-ReadyTimeoutMs", "60000"
-    ]
-    redirect := ">" OrcaQuoteArgument(outputPath) " 2>" OrcaQuoteArgument(outputPath ".err")
-    command := OrcaQuoteArgument(powershellPath)
-    for _, argument in arguments
-        command .= " " OrcaQuoteArgument(argument)
-    return command " " redirect
-}
+OrcaRunProcess(applicationPath, arguments, timeoutMs) {
+    stdoutRead := 0
+    stdoutWrite := 0
+    stderrRead := 0
+    stderrWrite := 0
+    processHandle := 0
+    threadHandle := 0
+    try {
+        securityAttributes := Buffer(A_PtrSize = 8 ? 24 : 12, 0)
+        NumPut("UInt", securityAttributes.Size, securityAttributes, 0)
+        NumPut("Ptr", 0, securityAttributes, A_PtrSize)
+        NumPut("Int", 1, securityAttributes, A_PtrSize * 2)
+        if !DllCall("Kernel32.dll\CreatePipe", "PtrP", &stdoutRead, "PtrP", &stdoutWrite, "Ptr", securityAttributes.Ptr, "UInt", 0)
+            throw Error("Orca workspace adapter could not create stdout pipe")
+        if !DllCall("Kernel32.dll\SetHandleInformation", "Ptr", stdoutRead, "UInt", 1, "UInt", 0)
+            throw Error("Orca workspace adapter could not configure stdout pipe")
+        if !DllCall("Kernel32.dll\CreatePipe", "PtrP", &stderrRead, "PtrP", &stderrWrite, "Ptr", securityAttributes.Ptr, "UInt", 0)
+            throw Error("Orca workspace adapter could not create stderr pipe")
+        if !DllCall("Kernel32.dll\SetHandleInformation", "Ptr", stderrRead, "UInt", 1, "UInt", 0)
+            throw Error("Orca workspace adapter could not configure stderr pipe")
 
-OrcaQuoteArgument(value) {
-    value := String(value)
-    return '"' StrReplace(value, '"', '""') '"'
-}
-
-OrcaWaitForProcess(processId, timeoutMs) {
-    startedAt := A_TickCount
-    while ProcessExist(processId) {
-        if (A_TickCount - startedAt >= timeoutMs) {
-            try ProcessClose(processId)
-            return false
+        commandLine := OrcaJoinArguments([applicationPath, arguments*])
+        commandBuffer := Buffer((StrLen(commandLine) + 1) * 2, 0)
+        StrPut(commandLine, commandBuffer, "UTF-16")
+        startupInfo := Buffer(A_PtrSize = 8 ? 104 : 68, 0)
+        NumPut("UInt", startupInfo.Size, startupInfo, 0)
+        NumPut("UInt", 0x100, startupInfo, 60)
+        stdinOffset := A_PtrSize = 8 ? 80 : 56
+        stdoutOffset := A_PtrSize = 8 ? 88 : 60
+        stderrOffset := A_PtrSize = 8 ? 96 : 64
+        NumPut("Ptr", DllCall("Kernel32.dll\GetStdHandle", "Int", -10, "Ptr"), startupInfo, stdinOffset)
+        NumPut("Ptr", stdoutWrite, startupInfo, stdoutOffset)
+        NumPut("Ptr", stderrWrite, startupInfo, stderrOffset)
+        processInfo := Buffer(A_PtrSize * 2 + 8, 0)
+        if !DllCall("Kernel32.dll\CreateProcessW", "Ptr", 0, "Ptr", commandBuffer.Ptr, "Ptr", 0, "Ptr", 0, "Int", 1, "UInt", 0x08000000, "Ptr", 0, "Ptr", 0, "Ptr", startupInfo.Ptr, "Ptr", processInfo.Ptr)
+            throw Error("Orca workspace adapter could not start PowerShell")
+        processHandle := NumGet(processInfo, 0, "Ptr")
+        threadHandle := NumGet(processInfo, A_PtrSize, "Ptr")
+        DllCall("Kernel32.dll\CloseHandle", "Ptr", stdoutWrite)
+        stdoutWrite := 0
+        DllCall("Kernel32.dll\CloseHandle", "Ptr", stderrWrite)
+        stderrWrite := 0
+        stdoutText := ""
+        stderrText := ""
+        startedAt := A_TickCount
+        timedOut := false
+        loop {
+            OrcaDrainPipe(stdoutRead, &stdoutText)
+            OrcaDrainPipe(stderrRead, &stderrText)
+            waitResult := DllCall("Kernel32.dll\WaitForSingleObject", "Ptr", processHandle, "UInt", 0)
+            if (waitResult = 0)
+                break
+            if (A_TickCount - startedAt >= timeoutMs) {
+                timedOut := true
+                DllCall("Kernel32.dll\TerminateProcess", "Ptr", processHandle, "UInt", 1)
+                DllCall("Kernel32.dll\WaitForSingleObject", "Ptr", processHandle, "UInt", 0xFFFFFFFF)
+                break
+            }
+            Sleep(10)
         }
-        Sleep(25)
+        loop 20 {
+            stdoutAvailable := OrcaDrainPipe(stdoutRead, &stdoutText)
+            stderrAvailable := OrcaDrainPipe(stderrRead, &stderrText)
+            if !(stdoutAvailable || stderrAvailable)
+                break
+            Sleep(5)
+        }
+        exitCode := -1
+        if !timedOut
+            DllCall("Kernel32.dll\GetExitCodeProcess", "Ptr", processHandle, "UIntP", &exitCode)
+        return Map("exitCode", timedOut ? -1 : exitCode, "timedOut", timedOut, "stdout", stdoutText, "stderr", stderrText)
+    } finally {
+        if threadHandle
+            DllCall("Kernel32.dll\CloseHandle", "Ptr", threadHandle)
+        if processHandle
+            DllCall("Kernel32.dll\CloseHandle", "Ptr", processHandle)
+        if stdoutWrite
+            DllCall("Kernel32.dll\CloseHandle", "Ptr", stdoutWrite)
+        if stderrWrite
+            DllCall("Kernel32.dll\CloseHandle", "Ptr", stderrWrite)
+        if stdoutRead
+            DllCall("Kernel32.dll\CloseHandle", "Ptr", stdoutRead)
+        if stderrRead
+            DllCall("Kernel32.dll\CloseHandle", "Ptr", stderrRead)
     }
-    return true
+}
+
+OrcaDrainPipe(pipeHandle, &text) {
+    available := 0
+    if !DllCall("Kernel32.dll\PeekNamedPipe", "Ptr", pipeHandle, "Ptr", 0, "UInt", 0, "Ptr", 0, "UIntP", &available, "Ptr", 0)
+        return false
+    if (available = 0)
+        return false
+    chunk := Buffer(available, 0)
+    bytesRead := 0
+    if DllCall("Kernel32.dll\ReadFile", "Ptr", pipeHandle, "Ptr", chunk.Ptr, "UInt", available, "UIntP", &bytesRead, "Ptr", 0)
+        text .= StrGet(chunk.Ptr, bytesRead, "UTF-8")
+    return bytesRead > 0
+}
+
+OrcaJoinArguments(arguments) {
+    commandLine := ""
+    for index, argument in arguments
+        commandLine .= (index = 1 ? "" : " ") OrcaQuoteWindowsArgument(argument)
+    return commandLine
+}
+
+OrcaQuoteWindowsArgument(value) {
+    value := String(value)
+    result := '"'
+    slashCount := 0
+    loop parse value {
+        character := A_LoopField
+        if (character = "\") {
+            slashCount += 1
+            continue
+        }
+        if (character = '"') {
+            result .= OrcaRepeatText("\", slashCount * 2 + 1) '"'
+            slashCount := 0
+            continue
+        }
+        if (slashCount > 0) {
+            result .= OrcaRepeatText("\", slashCount)
+            slashCount := 0
+        }
+        result .= character
+    }
+    if (slashCount > 0)
+        result .= OrcaRepeatText("\", slashCount * 2)
+    return result '"'
+}
+
+OrcaRepeatText(text, count) {
+    result := ""
+    loop count
+        result .= text
+    return result
 }
 
 OrcaJsonParse(text) {
@@ -319,7 +429,7 @@ class OrcaJsonReader {
             this.Position += 1
             if (character = '"')
                 return value
-            if (character != "\\") {
+            if (character != "\") {
                 value .= character
                 continue
             }
@@ -327,8 +437,12 @@ class OrcaJsonReader {
                 throw Error("Unterminated JSON escape")
             escape := SubStr(this.Text, this.Position, 1)
             this.Position += 1
-            if (escape = '"' || escape = "\\" || escape = "/")
-                value .= escape
+            if (escape = '"')
+                value .= '"'
+            else if (escape = "\")
+                value .= "\"
+            else if (escape = "/")
+                value .= "/"
             else if (escape = "b")
                 value .= Chr(8)
             else if (escape = "f")
