@@ -1,0 +1,461 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)]
+    [string]$SelectedPath,
+
+    [string]$OrcaCommand = 'orca',
+
+    [string]$GitCommand = 'git',
+
+    [int]$ReadyTimeoutMs = 60000,
+
+    # Tests may inject executable paths without depending on the user's PATH.
+    [string]$AgentCommandPathsJson = ''
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$agentDefinitions = @(
+    [pscustomobject]@{ Title = 'Codex'; Command = 'codex' }
+    [pscustomobject]@{ Title = 'Claude'; Command = 'claude' }
+    [pscustomobject]@{ Title = 'Grok'; Command = 'grok' }
+    [pscustomobject]@{ Title = 'Gemini'; Command = 'gemini' }
+)
+
+function ConvertTo-ProcessArgument {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Value
+    )
+
+    # ProcessStartInfo on Windows PowerShell 5.1 exposes one command-line
+    # string, so quote each array element using the Windows argv rules.
+    $builder = [System.Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    $backslashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') {
+            $backslashes++
+            continue
+        }
+        if ($character -eq '"') {
+            [void]$builder.Append('\', ($backslashes * 2) + 1)
+            [void]$builder.Append('"')
+            $backslashes = 0
+            continue
+        }
+        if ($backslashes -gt 0) {
+            [void]$builder.Append('\', $backslashes)
+            $backslashes = 0
+        }
+        [void]$builder.Append($character)
+    }
+    if ($backslashes -gt 0) {
+        [void]$builder.Append('\', $backslashes * 2)
+    }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function Invoke-BoundedProcess {
+    param(
+        [Parameter(Mandatory)]
+        [string]$FilePath,
+
+        [Parameter(Mandatory)]
+        [string[]]$Arguments,
+
+        [Parameter(Mandatory)]
+        [int]$TimeoutMs
+    )
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FilePath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.Arguments = [string]::Join(' ', ($Arguments | ForEach-Object {
+        ConvertTo-ProcessArgument -Value ([string]$_)
+    }))
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $timedOut = $false
+    try {
+        try {
+            if (-not $process.Start()) {
+                return [pscustomobject]@{
+                    Started  = $false
+                    ExitCode = -1
+                    TimedOut = $false
+                    Output   = ''
+                    Error    = ''
+                }
+            }
+        } catch {
+            return [pscustomobject]@{
+                Started  = $false
+                ExitCode = -1
+                TimedOut = $false
+                Output   = ''
+                Error    = $_.Exception.Message
+            }
+        }
+
+        $outputTask = $process.StandardOutput.ReadToEndAsync()
+        $errorTask = $process.StandardError.ReadToEndAsync()
+        $waitMs = [Math]::Max(1, $TimeoutMs)
+        $timedOut = -not $process.WaitForExit($waitMs)
+        if ($timedOut) {
+            try {
+                if (-not $process.HasExited) {
+                    $process.Kill()
+                }
+            } catch {
+                # The owned process may have exited between the checks.
+            }
+            $process.WaitForExit()
+        }
+        [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($outputTask, $errorTask))
+        return [pscustomobject]@{
+            Started  = $true
+            ExitCode = if ($timedOut) { -1 } else { $process.ExitCode }
+            TimedOut = $timedOut
+            Output   = $outputTask.Result
+            Error    = $errorTask.Result
+        }
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Get-ObjectProperty {
+    param(
+        [AllowNull()]
+        [object]$Object,
+
+        [Parameter(Mandatory)]
+        [string[]]$Names
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+    foreach ($name in $Names) {
+        if ($Object.PSObject.Properties.Name -contains $name) {
+            return $Object.PSObject.Properties[$name].Value
+        }
+    }
+    return $null
+}
+
+function Get-ErrorText {
+    param(
+        [AllowNull()]
+        [object]$Object,
+
+        [string]$Fallback = 'operation failed'
+    )
+
+    $value = Get-ObjectProperty -Object $Object -Names @('error', 'message', 'reason', 'code')
+    if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) {
+        return $Fallback
+    }
+    return ([string]$value).Trim()
+}
+
+function Invoke-OrcaJson {
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$Arguments,
+
+        [Parameter(Mandatory)]
+        [string]$Operation
+    )
+
+    $process = Invoke-BoundedProcess -FilePath $OrcaCommand -Arguments $Arguments -TimeoutMs $ReadyTimeoutMs
+    if (-not $process.Started) {
+        throw "Orca command unavailable while running $Operation."
+    }
+    if ($process.TimedOut) {
+        throw "Orca $Operation timed out."
+    }
+    if ($process.ExitCode -ne 0) {
+        throw "Orca $Operation failed."
+    }
+    if ([string]::IsNullOrWhiteSpace($process.Output)) {
+        throw "Orca $Operation returned no JSON."
+    }
+
+    try {
+        $envelope = $process.Output.Trim() | ConvertFrom-Json
+    } catch {
+        throw "Orca $Operation returned invalid JSON."
+    }
+    $ok = Get-ObjectProperty -Object $envelope -Names @('ok')
+    if ($ok -is [bool]) {
+        if (-not $ok) {
+            throw "Orca $Operation rejected the request. (ok=$ok; type=$($ok.GetType().FullName))"
+        }
+    } elseif ([string]$ok -ne 'true') {
+        throw "Orca $Operation rejected the request. (ok=$ok; type=$($ok.GetType().FullName))"
+    }
+    $result = Get-ObjectProperty -Object $envelope -Names @('result')
+    if ($null -eq $result) {
+        throw "Orca $Operation returned no result."
+    }
+    return $result
+}
+
+function Resolve-GitRoot {
+    $process = Invoke-BoundedProcess -FilePath $GitCommand -Arguments @(
+        '-C', $SelectedPath, 'rev-parse', '--show-toplevel'
+    ) -TimeoutMs $ReadyTimeoutMs
+    if (-not $process.Started -or $process.TimedOut -or $process.ExitCode -ne 0) {
+        throw 'Selected path is not a Git checkout.'
+    }
+    $gitRoot = $process.Output.Trim()
+    if ([string]::IsNullOrWhiteSpace($gitRoot)) {
+        throw 'Selected path is not a Git checkout.'
+    }
+    try {
+        return [IO.Path]::GetFullPath($gitRoot)
+    } catch {
+        throw 'Git returned an invalid repository root.'
+    }
+}
+
+function Normalize-PathValue {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        return ([IO.Path]::GetFullPath($Path)).TrimEnd('\')
+    } catch {
+        return $Path.Trim().TrimEnd('\')
+    }
+}
+
+function Test-SamePath {
+    param(
+        [AllowEmptyString()][string]$Left,
+        [AllowEmptyString()][string]$Right
+    )
+    if ([string]::IsNullOrWhiteSpace($Left) -or [string]::IsNullOrWhiteSpace($Right)) {
+        return $false
+    }
+    return [StringComparer]::OrdinalIgnoreCase.Equals(
+        (Normalize-PathValue -Path $Left),
+        (Normalize-PathValue -Path $Right)
+    )
+}
+
+function Get-AgentCommandPaths {
+    if ([string]::IsNullOrWhiteSpace($AgentCommandPathsJson)) {
+        return [pscustomobject]@{}
+    }
+    try {
+        $value = $AgentCommandPathsJson | ConvertFrom-Json
+    } catch {
+        throw 'Injected agent command paths are invalid JSON.'
+    }
+    if ($null -eq $value) {
+        return [pscustomobject]@{}
+    }
+    return $value
+}
+
+function Resolve-AgentExecutable {
+    param(
+        [Parameter(Mandatory)][string]$Command,
+        [Parameter(Mandatory)][object]$InjectedPaths
+    )
+
+    $injected = Get-ObjectProperty -Object $InjectedPaths -Names @($Command)
+    if ($null -ne $injected -and -not [string]::IsNullOrWhiteSpace([string]$injected)) {
+        $candidate = [string]$injected
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+        return $null
+    }
+
+    $commandInfo = Get-Command -Name $Command -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $commandInfo) {
+        return $null
+    }
+    return [string]$commandInfo.Source
+}
+
+function Test-LiveTerminal {
+    param([Parameter(Mandatory)][object]$Terminal)
+    $state = [string](Get-ObjectProperty -Object $Terminal -Names @('state', 'status', 'lifecycle'))
+    if ([string]::IsNullOrWhiteSpace($state)) {
+        return $false
+    }
+    return @('live', 'running', 'ready', 'tui-idle', 'active') -contains $state.Trim().ToLowerInvariant()
+}
+
+function Test-TerminalWorkspace {
+    param(
+        [Parameter(Mandatory)][object]$Terminal,
+        [Parameter(Mandatory)][string]$Selector,
+        [Parameter(Mandatory)][string]$RepositoryRoot
+    )
+    $workspace = Get-ObjectProperty -Object $Terminal -Names @(
+        'worktree', 'workspace', 'workspacePath', 'worktreePath', 'selector'
+    )
+    if ($null -eq $workspace) {
+        return $false
+    }
+    $workspaceText = ([string]$workspace).Trim()
+    if ([StringComparer]::OrdinalIgnoreCase.Equals($workspaceText, $Selector)) {
+        return $true
+    }
+    return Test-SamePath -Left $workspaceText -Right $RepositoryRoot
+}
+
+function Find-MatchingTerminal {
+    param(
+        [object[]]$Terminals = @(),
+        [Parameter(Mandatory)][string]$Title,
+        [Parameter(Mandatory)][string]$Command,
+        [Parameter(Mandatory)][string]$Selector,
+        [Parameter(Mandatory)][string]$RepositoryRoot
+    )
+    foreach ($terminal in $Terminals) {
+        if ($null -eq $terminal) {
+            continue
+        }
+        if (-not (Test-LiveTerminal -Terminal $terminal)) {
+            continue
+        }
+        $terminalTitle = ([string](Get-ObjectProperty -Object $terminal -Names @('title', 'name'))).Trim()
+        $terminalCommand = [string](Get-ObjectProperty -Object $terminal -Names @(
+            'command', 'commandName', 'executable', 'commandIdentity'
+        ))
+        if (-not [StringComparer]::OrdinalIgnoreCase.Equals($terminalTitle, $Title)) {
+            continue
+        }
+        if (-not [StringComparer]::OrdinalIgnoreCase.Equals($terminalCommand.Trim(), $Command)) {
+            continue
+        }
+        if (Test-TerminalWorkspace -Terminal $terminal -Selector $Selector -RepositoryRoot $RepositoryRoot) {
+            return $terminal
+        }
+    }
+    return $null
+}
+
+function Get-TerminalHandle {
+    param([Parameter(Mandatory)][object]$Terminal)
+    $handle = Get-ObjectProperty -Object $Terminal -Names @('handle', 'id', 'terminalId')
+    if ($null -eq $handle -or [string]::IsNullOrWhiteSpace([string]$handle)) {
+        return $null
+    }
+    return [string]$handle
+}
+
+$summary = [ordered]@{
+    success        = $false
+    repositoryRoot = ''
+    created        = @()
+    reused         = @()
+    skipped        = @()
+    failed         = @()
+    error          = ''
+}
+
+try {
+    $repositoryRoot = Resolve-GitRoot
+    $summary.repositoryRoot = $repositoryRoot
+    $selector = "path:$repositoryRoot"
+
+    $status = Invoke-OrcaJson -Arguments @('status', '--json') -Operation 'status'
+    $runtime = Get-ObjectProperty -Object $status -Names @('runtime')
+    $runtimeState = ([string](Get-ObjectProperty -Object $runtime -Names @('state'))).Trim().ToLowerInvariant()
+    $runtimeReachableValue = Get-ObjectProperty -Object $runtime -Names @('reachable')
+    $runtimeReachable = if ($runtimeReachableValue -is [bool]) {
+        $runtimeReachableValue
+    } else {
+        ([string]$runtimeReachableValue).Trim().ToLowerInvariant() -eq 'true'
+    }
+    if ($runtimeState -ne 'ready' -or -not $runtimeReachable) {
+        throw 'Orca runtime is not ready and reachable.'
+    }
+
+    $repositoryList = Invoke-OrcaJson -Arguments @('repo', 'list', '--json') -Operation 'repository list'
+    $repositories = @(Get-ObjectProperty -Object $repositoryList -Names @('repositories', 'repos'))
+    $registered = $false
+    foreach ($repository in $repositories) {
+        $registeredPath = Get-ObjectProperty -Object $repository -Names @(
+            'path', 'root', 'repositoryRoot', 'worktreePath'
+        )
+        if (Test-SamePath -Left ([string]$registeredPath) -Right $repositoryRoot) {
+            $registered = $true
+            break
+        }
+    }
+    if (-not $registered) {
+        [void](Invoke-OrcaJson -Arguments @('repo', 'add', '--path', $repositoryRoot, '--json') -Operation 'repository add')
+    }
+
+    $terminalList = Invoke-OrcaJson -Arguments @(
+        'terminal', 'list', '--worktree', $selector, '--json'
+    ) -Operation 'terminal list'
+    $terminals = @(Get-ObjectProperty -Object $terminalList -Names @('terminals'))
+    $injectedPaths = Get-AgentCommandPaths
+    $created = [System.Collections.Generic.List[string]]::new()
+    $reused = [System.Collections.Generic.List[string]]::new()
+    $skipped = [System.Collections.Generic.List[object]]::new()
+    $failed = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($agent in $agentDefinitions) {
+        $executable = Resolve-AgentExecutable -Command $agent.Command -InjectedPaths $injectedPaths
+        if ($null -eq $executable) {
+            $skipped.Add([pscustomobject]@{ agent = $agent.Title; reason = 'command not found' })
+            continue
+        }
+
+        $existing = Find-MatchingTerminal -Terminals $terminals -Title $agent.Title `
+            -Command $agent.Command -Selector $selector -RepositoryRoot $repositoryRoot
+        if ($null -ne $existing) {
+            $reused.Add($agent.Title)
+            continue
+        }
+
+        try {
+            $createdResult = Invoke-OrcaJson -Arguments @(
+                'terminal', 'create', '--worktree', $selector,
+                '--title', $agent.Title, '--command', $agent.Command, '--json'
+            ) -Operation "terminal create $($agent.Title)"
+            $handle = Get-TerminalHandle -Terminal $createdResult
+            if ($null -eq $handle) {
+                throw 'Orca did not return a terminal handle.'
+            }
+            $waitResult = Invoke-OrcaJson -Arguments @(
+                'terminal', 'wait', '--terminal', $handle,
+                '--for', 'tui-idle', '--timeout-ms', [string]$ReadyTimeoutMs, '--json'
+            ) -Operation "terminal wait $($agent.Title)"
+            $waitState = ([string](Get-ObjectProperty -Object $waitResult -Names @('state', 'status'))).Trim().ToLowerInvariant()
+            if ($waitState -ne 'tui-idle') {
+                throw 'Terminal did not reach tui-idle.'
+            }
+            $created.Add($agent.Title)
+        } catch {
+            $failed.Add([pscustomobject]@{ agent = $agent.Title; reason = $_.Exception.Message })
+        }
+    }
+
+    $summary.created = @($created)
+    $summary.reused = @($reused)
+    $summary.skipped = @($skipped)
+    $summary.failed = @($failed)
+    $summary.success = $true
+} catch {
+    $summary.error = "$($_.Exception.Message) [line $($_.InvocationInfo.ScriptLineNumber)]"
+    [Console]::Error.WriteLine("Orca AI workspace adapter: $($summary.error)")
+}
+
+$summary | ConvertTo-Json -Compress -Depth 12
