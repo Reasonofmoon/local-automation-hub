@@ -159,7 +159,12 @@ function Send-Envelope {
         } | ConvertTo-Json -Depth 12
         Write-Output ''
     }
+    if ([string]$scenario.oversizedOutputOperation -eq $operation) {
+        $Result['payload'] = ('raw-oversized-secret-' + ('x' * 1048576))
+    }
     if ([string]$scenario.duplicateEnvelopeOperation -eq $operation) {
+        $envelope | ConvertTo-Json -Depth 12
+    } elseif ([string]$scenario.prettyOutputOperation -eq $operation) {
         $envelope | ConvertTo-Json -Depth 12
     } else {
         $envelope | ConvertTo-Json -Compress -Depth 12
@@ -184,7 +189,14 @@ switch ($operation) {
     }
     'repo list' {
         $repositories = @()
-        if ([bool]$scenario.repositoryRegistered) {
+        if ([bool]$scenario.largePrettyRepositoryList) {
+            for ($index = 0; $index -lt 1000; $index++) {
+                $repositories += [ordered]@{
+                    id = "repo-$index"
+                    path = [string]$scenario.repositoryRoot
+                }
+            }
+        } elseif ([bool]$scenario.repositoryRegistered) {
             $repositories = @([ordered]@{ id = 'repo-1'; path = [string]$scenario.repositoryRoot })
         }
         Send-Envelope ([ordered]@{ repositories = $repositories })
@@ -351,6 +363,9 @@ try {
         listCreatedTerminals = $false
         framedOutputOperation = ''
         duplicateEnvelopeOperation = ''
+        prettyOutputOperation = ''
+        largePrettyRepositoryList = $false
+        oversizedOutputOperation = ''
     }
     $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
     $basic = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
@@ -390,6 +405,29 @@ try {
     $scenario.framedOutputOperation = ''
     $scenario.duplicateEnvelopeOperation = ''
     $scenario.repositoryRegistered = $false
+
+    $scenario.repositoryRegistered = $true
+    $scenario.largePrettyRepositoryList = $true
+    $scenario.prettyOutputOperation = 'repo list'
+    $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
+    Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
+    $largePrettyRepositoryList = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
+    Assert-Condition $largePrettyRepositoryList.Result.success 'repository list accepts a sub-1MiB pretty envelope with more than 3716 nonempty lines'
+    Assert-Equal 4 @($largePrettyRepositoryList.Result.created).Count 'large pretty repository list continues through terminal creation'
+
+    $scenario.largePrettyRepositoryList = $false
+    $scenario.prettyOutputOperation = ''
+    $scenario.oversizedOutputOperation = 'repo list'
+    $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
+    Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
+    $oversizedRepositoryList = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
+    Assert-Condition (-not $oversizedRepositoryList.Result.success) 'repository list rejects an envelope larger than 1MiB'
+    Assert-Condition ($oversizedRepositoryList.Result.error -like 'Orca repository list returned unusable JSON framing*shape=over-limit*') 'oversized repository list reports bounded framing metadata'
+    Assert-Condition ($oversizedRepositoryList.Result.error -notlike '*raw-oversized-secret*') 'oversized repository list error does not expose stdout content'
+
+    $scenario.oversizedOutputOperation = ''
+    $scenario.repositoryRegistered = $false
+    $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
 
     foreach ($nestedShape in @('terminal', 'startupTerminal')) {
         $scenario.createResponseShape = $nestedShape

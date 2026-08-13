@@ -20,3 +20,8 @@
 - A successful CLI can write a harmless notice before its machine-readable response; parsing all stdout as one JSON document couples the adapter to incidental framing.
 - Extract only bounded line-delimited candidates, then require exactly one top-level protocol envelope with `id`, Boolean `ok`, and the matching `result` or `error` member. Nested JSON-shaped log lines are not responses.
 - Framing errors must identify the operation and report only safe structure metadata such as nonempty line count, candidate count, and single/multi-line shape. Never echo stdout, tokens, terminal contents, or envelope values.
+
+## 2026-08-13 - Bound Orca JSON by payload size, not line formatting
+
+- Pretty-printed Orca envelopes may legitimately contain thousands of nonempty lines; a fixed line cap rejects valid output solely because of formatting.
+- Keep the UTF-8/character payload bound and report line count only as safe diagnostic metadata. The balanced top-level scanner and exact-one-envelope validation remain the framing protections.

@@ -198,10 +198,9 @@ function ConvertFrom-OrcaFramedJson {
     )
 
     $maxCharacters = 1048576
-    $maxLines = 512
     $allLines = @($Output -split "`r?`n")
     $nonEmptyLines = @($allLines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    if ($Output.Length -gt $maxCharacters -or $nonEmptyLines.Count -gt $maxLines) {
+    if ($Output.Length -gt $maxCharacters) {
         throw "Orca $Operation returned unusable JSON framing (lines=$($nonEmptyLines.Count); candidates=0; shape=over-limit)."
     }
 
