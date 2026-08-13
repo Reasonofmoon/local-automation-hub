@@ -205,19 +205,43 @@ function ConvertFrom-OrcaFramedJson {
         throw "Orca $Operation returned unusable JSON framing (lines=$($nonEmptyLines.Count); candidates=0; shape=over-limit)."
     }
 
-    $candidateTexts = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    foreach ($line in $nonEmptyLines) {
-        $trimmedLine = $line.Trim()
-        if ($trimmedLine.StartsWith('{') -and $trimmedLine.EndsWith('}')) {
-            [void]$candidateTexts.Add($trimmedLine)
-        }
-    }
-    for ($index = $nonEmptyLines.Count - 1; $index -ge 0; $index--) {
-        if (-not $nonEmptyLines[$index].TrimStart().StartsWith('{')) {
+    $candidateTexts = [System.Collections.Generic.List[string]]::new()
+    $objectStart = -1
+    $depth = 0
+    $inString = $false
+    $escaped = $false
+    for ($index = 0; $index -lt $Output.Length; $index++) {
+        $character = $Output[$index]
+        if ($depth -eq 0) {
+            if ($character -eq '{') {
+                $objectStart = $index
+                $depth = 1
+                $inString = $false
+                $escaped = $false
+            }
             continue
         }
-        $suffix = [string]::Join("`n", $nonEmptyLines[$index..($nonEmptyLines.Count - 1)]).Trim()
-        [void]$candidateTexts.Add($suffix)
+        if ($inString) {
+            if ($escaped) {
+                $escaped = $false
+            } elseif ($character -eq '\') {
+                $escaped = $true
+            } elseif ($character -eq '"') {
+                $inString = $false
+            }
+            continue
+        }
+        if ($character -eq '"') {
+            $inString = $true
+        } elseif ($character -eq '{') {
+            $depth++
+        } elseif ($character -eq '}') {
+            $depth--
+            if ($depth -eq 0) {
+                $candidateTexts.Add($Output.Substring($objectStart, $index - $objectStart + 1))
+                $objectStart = -1
+            }
+        }
     }
 
     $envelopes = [System.Collections.Generic.List[object]]::new()

@@ -142,16 +142,28 @@ function Send-Envelope {
     [Console]::Error.WriteLine(('FAKE_ENVELOPE=' + ($envelope | ConvertTo-Json -Compress -Depth 12)))
     if ([string]$scenario.framedOutputOperation -eq $operation) {
         Write-Output 'Orca CLI notice: using the active runtime.'
-        Write-Output '{"result":{"id":"nested-log-value"}}'
+        [ordered]@{
+            result = [ordered]@{
+                id = 'nested-log-value'
+                message = 'harmless { nested } text with a "quote" and a backslash \\'
+            }
+        } | ConvertTo-Json -Depth 12
+        $Result['diagnostic'] = 'result { braces } with a "quote" and a backslash \\'
     }
     if ([string]$scenario.duplicateEnvelopeOperation -eq $operation) {
+        Write-Output 'Orca CLI notice: replaying a buffered response.'
         [ordered]@{
             id = 'duplicate-request-id'
             ok = $true
-            result = [ordered]@{ ignored = $true }
-        } | ConvertTo-Json -Compress -Depth 12
+            result = [ordered]@{ ignored = $true; secret = 'raw-duplicate-secret' }
+        } | ConvertTo-Json -Depth 12
+        Write-Output ''
     }
-    $envelope | ConvertTo-Json -Compress -Depth 12
+    if ([string]$scenario.duplicateEnvelopeOperation -eq $operation) {
+        $envelope | ConvertTo-Json -Depth 12
+    } else {
+        $envelope | ConvertTo-Json -Compress -Depth 12
+    }
     if ([string]$scenario.framedOutputOperation -eq $operation) {
         Write-Output ''
         Write-Output '   '
@@ -373,6 +385,7 @@ try {
     Assert-Condition ($ambiguousOutput.Result.error -like '*candidates=2*') 'ambiguous framing error reports only safe candidate metadata'
     Assert-Condition ($ambiguousOutput.Result.error -notlike '*nested-log-value*') 'ambiguous framing error does not expose nested log values'
     Assert-Condition ($ambiguousOutput.Result.error -notlike '*duplicate-request-id*') 'ambiguous framing error does not expose envelope values'
+    Assert-Condition ($ambiguousOutput.Result.error -notlike '*raw-duplicate-secret*') 'ambiguous framing error does not expose raw result secrets'
 
     $scenario.framedOutputOperation = ''
     $scenario.duplicateEnvelopeOperation = ''
