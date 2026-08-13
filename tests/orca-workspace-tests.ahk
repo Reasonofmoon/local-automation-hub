@@ -205,6 +205,38 @@ contractResult := contractAdapter.Open(successScript, selectedContractPath)
 AssertTrue(contractResult["success"], "Win32 adapter captures stdout JSON")
 AssertEqual(selectedContractPath, contractResult["selectedPath"], "selected path arrives as one exact argv value")
 AssertEqual(1257, contractResult["readyTimeoutMs"], "same ReadyTimeoutMs is forwarded to PowerShell")
+AssertTrue(contractAdapter.HasOwnProp("perAgentReadyTimeoutMs"), "adapter stores the per-agent ready timeout separately")
+AssertTrue(contractAdapter.HasOwnProp("totalProcessTimeoutMs"), "adapter stores a distinct total process timeout")
+if contractAdapter.HasOwnProp("perAgentReadyTimeoutMs")
+    AssertEqual(1257, contractAdapter.perAgentReadyTimeoutMs, "per-agent timeout preserves the requested value")
+if contractAdapter.HasOwnProp("totalProcessTimeoutMs")
+    AssertTrue(contractAdapter.totalProcessTimeoutMs >= (1257 * 4 + 5000), "total timeout budgets four sequential agent waits plus bounded overhead")
+
+delayedScript := adapterTestRoot "\fake adapter delayed success script.ps1"
+delayedScriptBody := "param([string]$SelectedPath, [int]$ReadyTimeoutMs)`n"
+    . "Start-Sleep -Milliseconds 250`n"
+    . "[ordered]@{ success = $true; selectedPath = $SelectedPath; readyTimeoutMs = $ReadyTimeoutMs } | ConvertTo-Json -Compress`n"
+FileAppend(delayedScriptBody, delayedScript, "UTF-8")
+delayedPerAgentTimeoutMs := 100
+delayedAdapter := Win32OrcaProcessAdapter(delayedPerAgentTimeoutMs, "powershell.exe")
+delayedStartedAt := A_TickCount
+delayedResult := unset
+delayedFailure := ""
+try {
+    delayedResult := delayedAdapter.Open(delayedScript, selectedContractPath)
+} catch as caughtError {
+    delayedFailure := String(caughtError.Message)
+}
+delayedElapsedMs := A_TickCount - delayedStartedAt
+AssertEqual("", delayedFailure, "process may outlive one per-agent wait within the total budget")
+if delayedAdapter.HasOwnProp("totalProcessTimeoutMs") {
+    AssertTrue(delayedElapsedMs > delayedPerAgentTimeoutMs, "delayed process runs longer than one per-agent timeout")
+    AssertTrue(delayedElapsedMs < delayedAdapter.totalProcessTimeoutMs, "delayed process completes before the total process timeout")
+}
+if IsObject(delayedResult) {
+    AssertTrue(delayedResult["success"], "delayed process returns its JSON result")
+    AssertEqual(delayedPerAgentTimeoutMs, delayedResult["readyTimeoutMs"], "delayed process still receives the per-agent timeout")
+}
 
 failureScript := adapterTestRoot "\fake adapter failure script.ps1"
 failureScriptBody := "param([string]$SelectedPath, [int]$ReadyTimeoutMs)`n"
@@ -228,7 +260,7 @@ timeoutScriptBody := "param([string]$SelectedPath, [int]$ReadyTimeoutMs)`n"
     . "Start-Sleep -Milliseconds 3000`n"
     . "Set-Content -LiteralPath $SelectedPath -Value 'late'`n"
 FileAppend(timeoutScriptBody, timeoutScript, "UTF-8")
-timeoutAdapter := Win32OrcaProcessAdapter(100, "powershell.exe")
+timeoutAdapter := Win32OrcaProcessAdapter(100, "powershell.exe", 100)
 AssertThrowsContains(
     () => timeoutAdapter.Open(timeoutScript, timeoutMarker),
     "timed out",

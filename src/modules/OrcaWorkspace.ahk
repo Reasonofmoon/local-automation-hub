@@ -56,8 +56,17 @@ class Win32OrcaWorkspacePresenter {
 }
 
 class Win32OrcaProcessAdapter {
-    __New(readyTimeoutMs := 60000, powershellPath := "powershell.exe") {
-        this.readyTimeoutMs := Max(1, Integer(readyTimeoutMs))
+    static AgentCount := 4
+    static ProcessTimeoutOverheadMs := 5000
+
+    __New(readyTimeoutMs := 60000, powershellPath := "powershell.exe", totalProcessTimeoutMs := unset) {
+        this.perAgentReadyTimeoutMs := Max(1, Integer(readyTimeoutMs))
+        this.readyTimeoutMs := this.perAgentReadyTimeoutMs
+        minimumTotalTimeoutMs := this.perAgentReadyTimeoutMs * Win32OrcaProcessAdapter.AgentCount + Win32OrcaProcessAdapter.ProcessTimeoutOverheadMs
+        if IsSet(totalProcessTimeoutMs)
+            this.totalProcessTimeoutMs := Max(this.perAgentReadyTimeoutMs, Integer(totalProcessTimeoutMs))
+        else
+            this.totalProcessTimeoutMs := Max(this.perAgentReadyTimeoutMs, minimumTotalTimeoutMs)
         this.powershellPath := String(powershellPath)
     }
 
@@ -75,9 +84,9 @@ class Win32OrcaProcessAdapter {
             "-ExecutionPolicy", "Bypass",
             "-File", scriptPath,
             "-SelectedPath", selectedPath,
-            "-ReadyTimeoutMs", String(this.readyTimeoutMs)
+            "-ReadyTimeoutMs", String(this.perAgentReadyTimeoutMs)
         ]
-        processResult := OrcaRunProcess(this.powershellPath, arguments, this.readyTimeoutMs)
+        processResult := OrcaRunProcess(this.powershellPath, arguments, this.totalProcessTimeoutMs)
         if processResult["timedOut"]
             throw Error("Orca workspace adapter timed out")
         if processResult["exitCode"] != 0 {
