@@ -320,11 +320,16 @@ try {
     $startingCalls = @(Get-Content -LiteralPath $callLog | ForEach-Object { $_ | ConvertFrom-Json })
     Assert-Equal 1 $startingCalls.Count 'runtime rejection stops before repository mutation'
     Assert-Equal 'status' $startingCalls[0].command 'runtime validation is the first Orca call'
+    Assert-Condition ($starting.Result.error -like 'Orca runtime is starting*') 'runtime rejection explains the observed state and recovery action'
 
     $scenario.runtimeState = 'ready'
     $scenario.existingTerminal = $true
     $scenario.repositoryRegistered = $true
     $scenario | ConvertTo-Json -Compress | Set-Content -LiteralPath $scenarioPath -Encoding UTF8
+    Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
+    $emptyInjectedPaths = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths @{}
+    Assert-Condition $emptyInjectedPaths.Result.success 'empty injected paths do not trigger a StrictMode property error'
+
     Remove-Item -LiteralPath $callLog -Force -ErrorAction SilentlyContinue
     $reused = Invoke-Adapter -SelectedPath $nestedPath -OrcaCommand $fake.Command -AgentCommandPaths $agentPaths
     Assert-Condition $reused.Result.success 'existing terminal scenario succeeds'

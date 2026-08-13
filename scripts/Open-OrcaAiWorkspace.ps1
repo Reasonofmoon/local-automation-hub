@@ -145,8 +145,10 @@ function Get-ObjectProperty {
         return $null
     }
     foreach ($name in $Names) {
-        if ($Object.PSObject.Properties.Name -contains $name) {
-            return $Object.PSObject.Properties[$name].Value
+        foreach ($property in $Object.PSObject.Properties) {
+            if ($property.Name -eq $name) {
+                return $property.Value
+            }
         }
     }
     return $null
@@ -376,7 +378,7 @@ try {
         ([string]$runtimeReachableValue).Trim().ToLowerInvariant() -eq 'true'
     }
     if ($runtimeState -ne 'ready' -or -not $runtimeReachable) {
-        throw 'Orca runtime is not ready and reachable.'
+        throw "Orca runtime is $runtimeState (reachable=$runtimeReachable). Wait until Orca is ready, then try again."
     }
 
     $repositoryList = Invoke-OrcaJson -Arguments @('repo', 'list', '--json') -Operation 'repository list'

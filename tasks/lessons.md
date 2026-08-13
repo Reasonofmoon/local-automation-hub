@@ -4,3 +4,8 @@
 
 - AutoHotkey v2 identifiers are case-insensitive; never name locals after classes, and test startup composition by executing it headlessly rather than relying on `/Validate` alone.
 - User-visible commands need execution-level UI feedback tests, not only return-value or log assertions.
+## 2026-08-13 - Treat reported line numbers as evidence, not identity
+
+- A UI error ending in `[line 256]` did not identify the AutoHotkey source line 256. The adapter appends PowerShell `InvocationInfo.ScriptLineNumber`, and line 256 in that script was a strict-mode property lookup.
+- Reproduce through the real process boundary and capture the original result before editing the line that happens to share the same number.
+- Under PowerShell strict mode, do not read `$Object.PSObject.Properties.Name` when the property collection may be empty. Enumerate `PSPropertyInfo` objects and compare each `.Name` instead.
