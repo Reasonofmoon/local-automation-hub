@@ -56,13 +56,22 @@ class Win32OrcaWorkspacePresenter {
 }
 
 class Win32OrcaProcessAdapter {
-    static AgentCount := 4
+    static GitRootResolutionCallCount := 1
+    static OrcaStatusCallCount := 1
+    static RepositoryListCallCount := 1
+    static RepositoryAddCallCount := 1
+    static TerminalListCallCount := 1
+    static ExecutableLookupCallCount := 4
+    static TerminalCreateCallCount := 4
+    static TerminalWaitCallCount := 4
+    static MaximumBoundedProcessCallCount := 1 + 1 + 1 + 1 + 1 + 4 + 4 + 4
     static ProcessTimeoutOverheadMs := 5000
 
     __New(readyTimeoutMs := 60000, powershellPath := "powershell.exe", totalProcessTimeoutMs := unset) {
         this.perAgentReadyTimeoutMs := Max(1, Integer(readyTimeoutMs))
         this.readyTimeoutMs := this.perAgentReadyTimeoutMs
-        minimumTotalTimeoutMs := this.perAgentReadyTimeoutMs * Win32OrcaProcessAdapter.AgentCount + Win32OrcaProcessAdapter.ProcessTimeoutOverheadMs
+        minimumTotalTimeoutMs := this.perAgentReadyTimeoutMs * Win32OrcaProcessAdapter.MaximumBoundedProcessCallCount
+            + Win32OrcaProcessAdapter.ProcessTimeoutOverheadMs
         if IsSet(totalProcessTimeoutMs)
             this.totalProcessTimeoutMs := Max(this.perAgentReadyTimeoutMs, Integer(totalProcessTimeoutMs))
         else
@@ -203,6 +212,7 @@ OrcaRunProcess(applicationPath, arguments, timeoutMs) {
     stderrWrite := 0
     processHandle := 0
     threadHandle := 0
+    jobHandle := 0
     try {
         securityAttributes := Buffer(A_PtrSize = 8 ? 24 : 12, 0)
         NumPut("UInt", securityAttributes.Size, securityAttributes, 0)
@@ -230,10 +240,28 @@ OrcaRunProcess(applicationPath, arguments, timeoutMs) {
         NumPut("Ptr", stdoutWrite, startupInfo, stdoutOffset)
         NumPut("Ptr", stderrWrite, startupInfo, stderrOffset)
         processInfo := Buffer(A_PtrSize * 2 + 8, 0)
-        if !DllCall("Kernel32.dll\CreateProcessW", "Ptr", 0, "Ptr", commandBuffer.Ptr, "Ptr", 0, "Ptr", 0, "Int", 1, "UInt", 0x08000000, "Ptr", 0, "Ptr", 0, "Ptr", startupInfo.Ptr, "Ptr", processInfo.Ptr)
+
+        jobHandle := DllCall("Kernel32.dll\CreateJobObjectW", "Ptr", 0, "Ptr", 0, "Ptr")
+        if !jobHandle
+            throw Error("Orca workspace adapter could not create a process job")
+        extendedLimitInfo := Buffer(A_PtrSize = 8 ? 144 : 112, 0)
+        NumPut("UInt", 0x2000, extendedLimitInfo, 16)
+        if !DllCall("Kernel32.dll\SetInformationJobObject", "Ptr", jobHandle, "Int", 9, "Ptr", extendedLimitInfo.Ptr, "UInt", extendedLimitInfo.Size)
+            throw Error("Orca workspace adapter could not configure its process job")
+
+        creationFlags := 0x08000000 | 0x00000004
+        if !DllCall("Kernel32.dll\CreateProcessW", "Ptr", 0, "Ptr", commandBuffer.Ptr, "Ptr", 0, "Ptr", 0, "Int", 1, "UInt", creationFlags, "Ptr", 0, "Ptr", 0, "Ptr", startupInfo.Ptr, "Ptr", processInfo.Ptr)
             throw Error("Orca workspace adapter could not start PowerShell")
         processHandle := NumGet(processInfo, 0, "Ptr")
         threadHandle := NumGet(processInfo, A_PtrSize, "Ptr")
+        if !DllCall("Kernel32.dll\AssignProcessToJobObject", "Ptr", jobHandle, "Ptr", processHandle) {
+            DllCall("Kernel32.dll\TerminateProcess", "Ptr", processHandle, "UInt", 1)
+            throw Error("Orca workspace adapter could not assign PowerShell to its process job")
+        }
+        if (DllCall("Kernel32.dll\ResumeThread", "Ptr", threadHandle, "UInt") = 0xFFFFFFFF) {
+            DllCall("Kernel32.dll\TerminateJobObject", "Ptr", jobHandle, "UInt", 1)
+            throw Error("Orca workspace adapter could not resume PowerShell")
+        }
         DllCall("Kernel32.dll\CloseHandle", "Ptr", stdoutWrite)
         stdoutWrite := 0
         DllCall("Kernel32.dll\CloseHandle", "Ptr", stderrWrite)
@@ -250,7 +278,7 @@ OrcaRunProcess(applicationPath, arguments, timeoutMs) {
                 break
             if (A_TickCount - startedAt >= timeoutMs) {
                 timedOut := true
-                DllCall("Kernel32.dll\TerminateProcess", "Ptr", processHandle, "UInt", 1)
+                DllCall("Kernel32.dll\TerminateJobObject", "Ptr", jobHandle, "UInt", 1)
                 DllCall("Kernel32.dll\WaitForSingleObject", "Ptr", processHandle, "UInt", 0xFFFFFFFF)
                 break
             }
@@ -272,6 +300,8 @@ OrcaRunProcess(applicationPath, arguments, timeoutMs) {
             DllCall("Kernel32.dll\CloseHandle", "Ptr", threadHandle)
         if processHandle
             DllCall("Kernel32.dll\CloseHandle", "Ptr", processHandle)
+        if jobHandle
+            DllCall("Kernel32.dll\CloseHandle", "Ptr", jobHandle)
         if stdoutWrite
             DllCall("Kernel32.dll\CloseHandle", "Ptr", stdoutWrite)
         if stderrWrite

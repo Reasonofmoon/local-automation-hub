@@ -1,6 +1,6 @@
 # Orca AI development workspace verification
 
-Date: 2026-08-13 (Asia/Seoul)  
+Date: 2026-08-13 (Asia/Seoul)
 Repository: `C:\Users\sound\Documents\ChatGPT\autohotkey`
 
 ## Scope and safety boundary
@@ -66,3 +66,34 @@ the documentation commit. Source and test files were not modified by Task 3.
   the user must select a disposable checkout before manual QA can run.
 - The validation evidence is x64-only because the repository and runner use
   `AutoHotkey64.exe`; x86 AutoHotkey was not tested (Minor).
+
+## Final-gate timeout and process-tree correction
+
+The outer AutoHotkey timeout now budgets the PowerShell adapter's exact
+worst-case sequence of 17 timeout-bounded external calls: Git root resolution,
+Orca status, repository list, optional repository add, terminal list, four
+executable lookups, four terminal creates, and four terminal waits. The default
+is `17 * ReadyTimeoutMs + 5000ms`; the original per-call value is still passed
+unchanged to PowerShell.
+
+The native launcher now creates PowerShell suspended, assigns it to a Windows
+Job Object configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and only then
+resumes its main thread. Timeout terminates the Job Object, so PowerShell and
+its descendants share the same bounded lifetime. Normal completion closes the
+job only after PowerShell exits.
+
+Fresh evidence on 2026-08-13 (Asia/Seoul):
+
+- RED: the strengthened focused AHK run exited `1`/timed out against the old
+  four-wait budget and parent-only process termination implementation.
+- GREEN: `powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only orca-workspace`
+  exited `0`; the fake PowerShell child wrote its started marker, while neither
+  the child nor parent wrote a late marker after timeout.
+- Final automated run, `2026-08-13T12:46:44.7725470+09:00` to
+  `2026-08-13T12:47:20.6607056+09:00`: fake-Orca PowerShell contracts passed;
+  all 8 AHK test files passed; `main.ahk` validation exited `0`; 7 PowerShell
+  files parsed; AutoHotkey PID set stayed exactly `9752,13532,37064` with no
+  new PID.
+
+No real Orca command, agent CLI, terminal, folder picker, or visible UI was
+used for this correction. The manual QA status above remains unchanged.

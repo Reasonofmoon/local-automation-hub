@@ -209,15 +209,30 @@ AssertTrue(contractAdapter.HasOwnProp("perAgentReadyTimeoutMs"), "adapter stores
 AssertTrue(contractAdapter.HasOwnProp("totalProcessTimeoutMs"), "adapter stores a distinct total process timeout")
 if contractAdapter.HasOwnProp("perAgentReadyTimeoutMs")
     AssertEqual(1257, contractAdapter.perAgentReadyTimeoutMs, "per-agent timeout preserves the requested value")
-if contractAdapter.HasOwnProp("totalProcessTimeoutMs")
-    AssertTrue(contractAdapter.totalProcessTimeoutMs >= (1257 * 4 + 5000), "total timeout budgets four sequential agent waits plus bounded overhead")
+AssertEqual(17, Win32OrcaProcessAdapter.MaximumBoundedProcessCallCount, "production budget counts every worst-case bounded adapter call")
+calculatedBoundedCallCount := Win32OrcaProcessAdapter.GitRootResolutionCallCount
+    + Win32OrcaProcessAdapter.OrcaStatusCallCount
+    + Win32OrcaProcessAdapter.RepositoryListCallCount
+    + Win32OrcaProcessAdapter.RepositoryAddCallCount
+    + Win32OrcaProcessAdapter.TerminalListCallCount
+    + Win32OrcaProcessAdapter.ExecutableLookupCallCount
+    + Win32OrcaProcessAdapter.TerminalCreateCallCount
+    + Win32OrcaProcessAdapter.TerminalWaitCallCount
+AssertEqual(calculatedBoundedCallCount, Win32OrcaProcessAdapter.MaximumBoundedProcessCallCount, "named operation counts cannot drift from the total budget")
+if contractAdapter.HasOwnProp("totalProcessTimeoutMs") {
+    expectedTotalTimeoutMs := 1257 * Win32OrcaProcessAdapter.MaximumBoundedProcessCallCount
+        + Win32OrcaProcessAdapter.ProcessTimeoutOverheadMs
+    AssertEqual(expectedTotalTimeoutMs, contractAdapter.totalProcessTimeoutMs, "default total timeout uses the exact worst-case call budget")
+    AssertTrue(contractAdapter.totalProcessTimeoutMs >= (1257 * 17 + 5000), "default total timeout covers all sequential calls plus fixed overhead")
+}
 
 delayedScript := adapterTestRoot "\fake adapter delayed success script.ps1"
+delayedPerAgentTimeoutMs := 100
+oldFourAgentBudgetMs := delayedPerAgentTimeoutMs * 4 + Win32OrcaProcessAdapter.ProcessTimeoutOverheadMs
 delayedScriptBody := "param([string]$SelectedPath, [int]$ReadyTimeoutMs)`n"
-    . "Start-Sleep -Milliseconds 250`n"
+    . "Start-Sleep -Milliseconds " (oldFourAgentBudgetMs + 200) "`n"
     . "[ordered]@{ success = $true; selectedPath = $SelectedPath; readyTimeoutMs = $ReadyTimeoutMs } | ConvertTo-Json -Compress`n"
 FileAppend(delayedScriptBody, delayedScript, "UTF-8")
-delayedPerAgentTimeoutMs := 100
 delayedAdapter := Win32OrcaProcessAdapter(delayedPerAgentTimeoutMs, "powershell.exe")
 delayedStartedAt := A_TickCount
 delayedResult := unset
@@ -230,7 +245,7 @@ try {
 delayedElapsedMs := A_TickCount - delayedStartedAt
 AssertEqual("", delayedFailure, "process may outlive one per-agent wait within the total budget")
 if delayedAdapter.HasOwnProp("totalProcessTimeoutMs") {
-    AssertTrue(delayedElapsedMs > delayedPerAgentTimeoutMs, "delayed process runs longer than one per-agent timeout")
+    AssertTrue(delayedElapsedMs > oldFourAgentBudgetMs, "delayed process outlives the obsolete four-agent total budget")
     AssertTrue(delayedElapsedMs < delayedAdapter.totalProcessTimeoutMs, "delayed process completes before the total process timeout")
 }
 if IsObject(delayedResult) {
@@ -254,20 +269,32 @@ AssertThrowsContains(
     "nonzero exit maps the exact process exit code"
 )
 
-timeoutMarker := adapterTestRoot "\timeout marker.txt"
-timeoutScript := adapterTestRoot "\fake adapter timeout script.ps1"
+timeoutParentMarker := adapterTestRoot "\timeout-parent-marker.txt"
+timeoutChildMarker := adapterTestRoot "\timeout-child-marker.txt"
+timeoutChildStartedMarker := adapterTestRoot "\timeout-child-started.txt"
+timeoutChildScript := adapterTestRoot "\timeout-child.ps1"
+timeoutChildScriptBody := "param([string]$MarkerPath, [string]$StartedMarkerPath)`n"
+    . "Set-Content -LiteralPath $StartedMarkerPath -Value 'started'`n"
+    . "Start-Sleep -Milliseconds 1000`n"
+    . "Set-Content -LiteralPath $MarkerPath -Value 'child-late'`n"
+FileAppend(timeoutChildScriptBody, timeoutChildScript, "UTF-8")
+timeoutScript := adapterTestRoot "\timeout-parent.ps1"
 timeoutScriptBody := "param([string]$SelectedPath, [int]$ReadyTimeoutMs)`n"
-    . "Start-Sleep -Milliseconds 3000`n"
-    . "Set-Content -LiteralPath $SelectedPath -Value 'late'`n"
+    . "Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','" timeoutChildScript "','-MarkerPath','" timeoutChildMarker "','-StartedMarkerPath','" timeoutChildStartedMarker "')`n"
+    . "while (-not (Test-Path -LiteralPath '" timeoutChildStartedMarker "')) { Start-Sleep -Milliseconds 10 }`n"
+    . "Start-Sleep -Milliseconds 1000`n"
+    . "Set-Content -LiteralPath $SelectedPath -Value 'parent-late'`n"
 FileAppend(timeoutScriptBody, timeoutScript, "UTF-8")
-timeoutAdapter := Win32OrcaProcessAdapter(100, "powershell.exe", 100)
+timeoutAdapter := Win32OrcaProcessAdapter(800, "powershell.exe", 800)
 AssertThrowsContains(
-    () => timeoutAdapter.Open(timeoutScript, timeoutMarker),
+    () => timeoutAdapter.Open(timeoutScript, timeoutParentMarker),
     "timed out",
-    "timeout reports a bounded owned-process failure"
+    "process-tree timeout reports a bounded failure"
 )
-Sleep(500)
-AssertFalse(FileExist(timeoutMarker), "timeout terminates the owned process before its late write")
+Sleep(1250)
+AssertTrue(FileExist(timeoutChildStartedMarker), "timeout occurs only after the child process has started")
+AssertFalse(FileExist(timeoutParentMarker), "timeout terminates the PowerShell parent before its late write")
+AssertFalse(FileExist(timeoutChildMarker), "timeout terminates the PowerShell child before its late write")
 try DirDelete(adapterTestRoot, true)
 
 ExitWithTestResult()
