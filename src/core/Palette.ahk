@@ -63,14 +63,18 @@ class CommandPalette {
 
     Show() {
         this.CaptureTargetBeforeShow()
+        this.ShowGui()
+        this.isVisible := true
+        return true
+    }
+
+    ShowGui() {
         this.EnsureGui()
         this.SetQuery("")
         this.editControl.Value := ""
         this.RenderResults()
         this.gui.Show()
         this.editControl.Focus()
-        this.isVisible := true
-        return true
     }
 
     CaptureTargetBeforeShow() {

@@ -78,6 +78,22 @@ targetPalette.ExecuteSelection()
 AssertEqual("capture", paletteEvents[1], "captures before invocation")
 AssertEqual("invoke-hidden", paletteEvents[2], "hides palette before command invocation")
 
+AssertThrows(
+    () => CommandPalette(targetRegistry, context, Map()),
+    "rejects a palette target without CaptureBeforePalette"
+)
+warningPalette := CommandPalette(targetRegistry, context, ThrowingPaletteTargetHandoff())
+warningPalette.CaptureTargetBeforeShow()
+AssertEqual("warn", context.lastNotification["level"], "notifies when target capture fails")
+AssertTrue(InStr(context.lastNotification["message"], "capture failed") > 0, "reports the target capture failure")
+
+showEvents := []
+showPalette := TestableCommandPalette(targetRegistry, context, FakePaletteTargetHandoff(showEvents), showEvents)
+showPalette.Show()
+AssertEqual("capture", showEvents[1], "Show captures the target before GUI setup")
+AssertEqual("show", showEvents[2], "Show invokes GUI setup after target capture")
+AssertTrue(showPalette.IsOpen(), "Show marks the palette visible after GUI setup")
+
 keyRouteInvocations := []
 keyRegistry := CommandRegistry()
 keyRegistry.Register("key.one", "Key one", ["key"], "low", TrackPaletteKeyRoute.Bind(keyRouteInvocations, "one"))
@@ -163,6 +179,23 @@ class FakePaletteTargetHandoff {
         this.captureCount += 1
         this.events.Push("capture")
         return Map("windowHandle", 100)
+    }
+}
+
+class ThrowingPaletteTargetHandoff {
+    CaptureBeforePalette() {
+        throw Error("capture failed")
+    }
+}
+
+class TestableCommandPalette extends CommandPalette {
+    __New(registry, context, targetHandoff, events) {
+        this.events := events
+        super.__New(registry, context, targetHandoff)
+    }
+
+    ShowGui() {
+        this.events.Push("show")
     }
 }
 
