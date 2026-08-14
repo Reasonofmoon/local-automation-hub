@@ -40,6 +40,7 @@ class SnippetService {
         try {
             this.inputAdapter.SetClipboardText(body)
             this.inputAdapter.Paste(targetSnapshot)
+            this.inputAdapter.WaitForPasteHandoff()
         } finally {
             this.inputAdapter.RestoreClipboard(savedClipboard)
             savedClipboard := ""
@@ -49,50 +50,109 @@ class SnippetService {
 }
 
 class Win32InputAdapter {
-    EnsureSafeTarget() {
-        targetSnapshot := this.CaptureTargetSnapshot()
-        this.ValidateTargetSnapshot(targetSnapshot)
+    __New(postPasteDelayMs := 150) {
+        this.capturedTarget := ""
+        this.postPasteDelayMs := Max(0, Integer(postPasteDelayMs))
+    }
 
-        targetProcessId := WinGetPID("ahk_id " targetSnapshot["windowHandle"])
+    CaptureBeforePalette() {
+        this.capturedTarget := ""
+        windowHandle := WinExist("A")
+        if !windowHandle
+            throw Error("Snippet insertion requires an active target before opening the palette")
+
+        processId := WinGetPID("ahk_id " windowHandle)
+        focusedControl := ""
+        try focusedControl := ControlGetFocus("ahk_id " windowHandle)
+        controlHandle := 0
+        controlClass := ""
+        controlStyle := 0
+        if (focusedControl != "") {
+            try controlHandle := ControlGetHwnd(focusedControl, "ahk_id " windowHandle)
+            try controlClass := ControlGetClassNN(focusedControl, "ahk_id " windowHandle)
+            try controlStyle := ControlGetStyle(focusedControl, "ahk_id " windowHandle)
+        }
+
+        this.capturedTarget := Map(
+            "windowHandle", windowHandle,
+            "processId", processId,
+            "controlHandle", controlHandle,
+            "controlClass", controlClass,
+            "controlStyle", controlStyle,
+            "isStandardControl", controlHandle != 0 && IsStandardTextControl(controlClass)
+        )
+        return this.capturedTarget
+    }
+
+    EnsureSafeTarget() {
+        if !IsObject(this.capturedTarget)
+            throw Error("Snippet insertion requires a captured pre-palette target")
+
+        targetSnapshot := this.capturedTarget
+        this.capturedTarget := ""
+        windowHandle := targetSnapshot["windowHandle"]
+        if !WinExist("ahk_id " windowHandle)
+            throw Error("Snippet insertion target no longer exists")
+        if WinGetPID("ahk_id " windowHandle) != targetSnapshot["processId"]
+            throw Error("Snippet insertion target process changed")
+
+        targetProcessId := targetSnapshot["processId"]
         if IsProcessElevated(targetProcessId) && !IsProcessElevated(DllCall("GetCurrentProcessId", "UInt"))
             throw Error("Snippet insertion is blocked for elevated targets")
+
+        if targetSnapshot["isStandardControl"]
+            this.ValidateTargetSnapshot(targetSnapshot)
+
+        WinActivate("ahk_id " windowHandle)
+        if !WinWaitActive("ahk_id " windowHandle, , 1)
+            throw Error("Snippet insertion target could not be activated")
+
+        if targetSnapshot["isStandardControl"] {
+            ControlFocus(targetSnapshot["controlHandle"], "ahk_id " windowHandle)
+            currentControl := ControlGetFocus("ahk_id " windowHandle)
+            currentControlHandle := currentControl = "" ? 0 : ControlGetHwnd(currentControl, "ahk_id " windowHandle)
+            if currentControlHandle != targetSnapshot["controlHandle"]
+                throw Error("Snippet insertion is blocked because focus changed before input")
+        }
         return targetSnapshot
     }
 
     ConfirmSafeTarget(targetSnapshot) {
         if !IsObject(targetSnapshot)
             throw Error("Snippet insertion target snapshot is invalid")
-        currentTarget := this.CaptureTargetSnapshot()
-        if !SameSnippetTarget(targetSnapshot, currentTarget)
+        for key in ["windowHandle", "processId", "controlHandle", "controlClass", "controlStyle", "isStandardControl"] {
+            if !targetSnapshot.Has(key)
+                throw Error("Snippet insertion target snapshot is invalid")
+        }
+        windowHandle := targetSnapshot["windowHandle"]
+        if !WinExist("ahk_id " windowHandle)
+            throw Error("Snippet insertion target no longer exists")
+        if WinGetPID("ahk_id " windowHandle) != targetSnapshot["processId"]
+            throw Error("Snippet insertion target process changed")
+        if WinExist("A") != windowHandle
             throw Error("Snippet insertion is blocked because focus changed before input")
-        this.ValidateTargetSnapshot(currentTarget)
-        targetProcessId := WinGetPID("ahk_id " currentTarget["windowHandle"])
+
+        targetProcessId := targetSnapshot["processId"]
         if IsProcessElevated(targetProcessId) && !IsProcessElevated(DllCall("GetCurrentProcessId", "UInt"))
             throw Error("Snippet insertion is blocked for elevated targets")
+
+        if targetSnapshot["isStandardControl"] {
+            this.ValidateTargetSnapshot(targetSnapshot)
+            currentControl := ControlGetFocus("ahk_id " windowHandle)
+            currentControlHandle := currentControl = "" ? 0 : ControlGetHwnd(currentControl, "ahk_id " windowHandle)
+            if currentControlHandle != targetSnapshot["controlHandle"]
+                throw Error("Snippet insertion is blocked because focus changed before input")
+        }
         return true
     }
 
-    CaptureTargetSnapshot() {
-        windowHandle := WinExist("A")
-        if !windowHandle
-            throw Error("Snippet insertion requires an active window")
-        focusedControl := ControlGetFocus("ahk_id " windowHandle)
-        if (focusedControl = "")
-            throw Error("Snippet insertion requires a focused standard text control; browser and custom controls are blocked")
-        controlHandle := ControlGetHwnd(focusedControl, "ahk_id " windowHandle)
-        if !controlHandle
-            throw Error("Snippet insertion is blocked because the focused control handle is unavailable")
-        controlClass := ControlGetClassNN(focusedControl, "ahk_id " windowHandle)
-        controlStyle := ControlGetStyle(focusedControl, "ahk_id " windowHandle)
-        return Map(
-            "windowHandle", windowHandle,
-            "controlHandle", controlHandle,
-            "controlClass", controlClass,
-            "controlStyle", controlStyle
-        )
-    }
-
     ValidateTargetSnapshot(targetSnapshot) {
+        if !IsObject(targetSnapshot)
+            throw Error("Snippet insertion target snapshot is invalid")
+        if !targetSnapshot.Has("controlHandle") || !targetSnapshot.Has("controlClass") || !targetSnapshot.Has("controlStyle")
+            throw Error("Snippet insertion target snapshot is invalid")
+        if !targetSnapshot["controlHandle"]
+            throw Error("Snippet insertion is blocked because the focused control handle is unavailable")
         controlClass := targetSnapshot["controlClass"]
         controlStyle := targetSnapshot["controlStyle"]
         if !IsStandardTextControl(controlClass)
@@ -118,6 +178,12 @@ class Win32InputAdapter {
 
     RestoreClipboard(savedClipboard) {
         A_Clipboard := savedClipboard
+    }
+
+    WaitForPasteHandoff() {
+        if this.postPasteDelayMs > 0
+            Sleep(this.postPasteDelayMs)
+        return true
     }
 
     SendText(targetSnapshot, text) {
