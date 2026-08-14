@@ -58,6 +58,26 @@ AssertEqual("window.left", palette.VisibleCommandIds()[1], "filters palette")
 palette.SelectIndex(1)
 AssertEqual("ok", palette.ExecuteSelection(), "executes selected command")
 
+paletteEvents := []
+paletteTarget := FakePaletteTargetHandoff(paletteEvents)
+targetRegistry := CommandRegistry()
+targetPalette := CommandPalette(targetRegistry, context, paletteTarget)
+targetRegistry.Register(
+    "snippet.target-test",
+    "Snippet target test",
+    ["snippet"],
+    "low",
+    TrackPaletteVisibility.Bind(targetPalette, paletteEvents)
+)
+
+targetPalette.CaptureTargetBeforeShow()
+AssertEqual(1, paletteTarget.captureCount, "captures the target before palette display")
+targetPalette.SetQuery("target")
+targetPalette.isVisible := true
+targetPalette.ExecuteSelection()
+AssertEqual("capture", paletteEvents[1], "captures before invocation")
+AssertEqual("invoke-hidden", paletteEvents[2], "hides palette before command invocation")
+
 keyRouteInvocations := []
 keyRegistry := CommandRegistry()
 keyRegistry.Register("key.one", "Key one", ["key"], "low", TrackPaletteKeyRoute.Bind(keyRouteInvocations, "one"))
@@ -71,6 +91,7 @@ catch
     enterRoutingError := true
 AssertFalse(enterRoutingError, "accepts Enter with the OnMessage callback signature")
 AssertEqual("one", keyRouteInvocations.Length ? keyRouteInvocations[1] : "", "routes Enter from the OnMessage callback signature")
+keyPalette.isVisible := true
 numericRoutingError := false
 try keyPalette.RouteKeyDown(0x32, 0, 0x100, true)
 catch
@@ -130,4 +151,22 @@ ThrowBoom(*) {
 TrackPaletteKeyRoute(invocations, id, *) {
     invocations.Push(id)
     return Map("success", false, "error", "test only")
+}
+
+class FakePaletteTargetHandoff {
+    __New(events) {
+        this.events := events
+        this.captureCount := 0
+    }
+
+    CaptureBeforePalette() {
+        this.captureCount += 1
+        this.events.Push("capture")
+        return Map("windowHandle", 100)
+    }
+}
+
+TrackPaletteVisibility(palette, events, *) {
+    events.Push(palette.IsOpen() ? "invoke-visible" : "invoke-hidden")
+    return "ok"
 }

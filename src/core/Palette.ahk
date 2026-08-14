@@ -1,9 +1,12 @@
 #Requires AutoHotkey v2.0
 
 class CommandPalette {
-    __New(registry, context) {
+    __New(registry, context, targetHandoff := unset) {
         this.registry := registry
         this.context := context
+        this.targetHandoff := IsSet(targetHandoff) ? targetHandoff : ""
+        if IsObject(this.targetHandoff) && !HasMethod(this.targetHandoff, "CaptureBeforePalette")
+            throw TypeError("Palette target handoff must provide CaptureBeforePalette")
         this.query := ""
         this.results := []
         this.selectedIndex := 0
@@ -46,6 +49,7 @@ class CommandPalette {
         }
 
         command := this.results[this.selectedIndex]
+        this.Hide()
         try result := this.registry.Invoke(command["id"], this.context)
         catch error {
             this.context.Notify(SafeErrorMessage(error), "error")
@@ -54,12 +58,11 @@ class CommandPalette {
 
         if IsObject(result) && result is Map && result.Has("success") && !result["success"]
             this.context.Notify(result.Has("error") ? result["error"] : "Command failed", "error")
-        else
-            this.Hide()
         return result
     }
 
     Show() {
+        this.CaptureTargetBeforeShow()
         this.EnsureGui()
         this.SetQuery("")
         this.editControl.Value := ""
@@ -68,6 +71,16 @@ class CommandPalette {
         this.editControl.Focus()
         this.isVisible := true
         return true
+    }
+
+    CaptureTargetBeforeShow() {
+        if IsObject(this.targetHandoff) {
+            try return this.targetHandoff.CaptureBeforePalette()
+            catch as caughtError {
+                this.context.Notify(SafeErrorMessage(caughtError), "warn")
+            }
+        }
+        return ""
     }
 
     Hide(*) {
