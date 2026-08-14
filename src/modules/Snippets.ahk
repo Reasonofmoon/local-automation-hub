@@ -40,10 +40,12 @@ class SnippetService {
         try {
             this.inputAdapter.SetClipboardText(body)
             this.inputAdapter.Paste(targetSnapshot)
-            this.inputAdapter.WaitForPasteHandoff()
         } finally {
-            this.inputAdapter.RestoreClipboard(savedClipboard)
-            savedClipboard := ""
+            try this.inputAdapter.WaitForPasteHandoff()
+            finally {
+                this.inputAdapter.RestoreClipboard(savedClipboard)
+                savedClipboard := ""
+            }
         }
         return true
     }

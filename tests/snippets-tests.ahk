@@ -225,6 +225,7 @@ failingPasteAdapter.CaptureBeforePalette()
 failingPasteService := SnippetService(Map("multi", "line 1`nline 2"), failingPasteAdapter)
 AssertThrows(() => failingPasteService.Insert("multi"), "surfaces paste failure")
 AssertEqual("before", failingPasteAdapter.ClipboardText(), "restores clipboard after paste failure")
+AssertEqual("wait,restore", failingPasteAdapter.EventSummary(), "waits for paste handoff before restoring after paste failure")
 
 repeatedAdapter := FakeInputAdapter("before")
 firstSnapshot := repeatedAdapter.CaptureBeforePalette()
