@@ -45,7 +45,7 @@
 - Consumes: optional object with `CaptureBeforePalette()`.
 - Produces: `CommandPalette(registry, context, targetHandoff := unset)`, `CommandPalette.CaptureTargetBeforeShow()`, and the guarantee that `isVisible=false` before `registry.Invoke(...)` starts.
 
-- [ ] **Step 1: Read the current palette and focused core tests**
+- [x] **Step 1: Read the current palette and focused core tests**
 
 ```powershell
 Get-Content -Raw src\core\Palette.ahk
@@ -55,7 +55,7 @@ git status --short
 
 Expected: no product changes beyond work explicitly owned by this task; `.superpowers/` may remain untracked.
 
-- [ ] **Step 2: Add RED tests for capture and invocation ordering**
+- [x] **Step 2: Add RED tests for capture and invocation ordering**
 
 Add a fake target capability and an invocation probe to `tests/core-tests.ahk`:
 
@@ -103,7 +103,7 @@ AssertEqual("capture", paletteEvents[1], "captures before invocation")
 AssertEqual("invoke-hidden", paletteEvents[2], "hides palette before command invocation")
 ```
 
-- [ ] **Step 3: Run the focused RED test**
+- [x] **Step 3: Run the focused RED test**
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only core
@@ -111,7 +111,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only co
 
 Expected: FAIL because the third `CommandPalette` constructor argument and `CaptureTargetBeforeShow()` do not exist, or because invocation observes `invoke-visible`.
 
-- [ ] **Step 4: Implement the minimal palette boundary**
+- [x] **Step 4: Implement the minimal palette boundary**
 
 Update the constructor and add the capture method:
 
@@ -187,7 +187,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only co
 
 Expected: focused runner PASS and validation exit 0 with no modal error.
 
-- [ ] **Step 6: Review and commit Task 1**
+Evidence note: the focused core runner passed, but the Task 1 report records
+that standalone `src\core\Palette.ahk /Validate` remained resident because of
+the file's `OnMessage()` handler and had to be terminated. This step therefore
+remains unchecked; the concern is not treated as a validation PASS.
+
+- [x] **Step 6: Review and commit Task 1**
 
 ```powershell
 git diff --check
@@ -211,7 +216,7 @@ Expected: one commit containing only the palette boundary and focused tests.
 - Produces: `Win32InputAdapter.CaptureBeforePalette()`, `Win32InputAdapter.EnsureSafeTarget()`, and target snapshot keys `windowHandle`, `processId`, `controlHandle`, `controlClass`, `controlStyle`, `isStandardControl`.
 - Preserves: `SnippetService.Insert(id)`, `SendText(targetSnapshot, text)`, `Paste(targetSnapshot)`, and clipboard capture/restore contracts.
 
-- [ ] **Step 1: Read the current snippet service and tests immediately before editing**
+- [x] **Step 1: Read the current snippet service and tests immediately before editing**
 
 ```powershell
 Get-Content -Raw src\modules\Snippets.ahk
@@ -219,7 +224,7 @@ Get-Content -Raw tests\snippets-tests.ahk
 git status --short
 ```
 
-- [ ] **Step 2: Extend the fake adapter with capture, custom-target, identity, and operation-order state**
+- [x] **Step 2: Extend the fake adapter with capture, custom-target, identity, and operation-order state**
 
 Replace the fake's implicit always-safe target with an explicit captured target:
 
@@ -328,7 +333,7 @@ EventSummary() {
 }
 ```
 
-- [ ] **Step 3: Add RED tests for custom controls and fail-closed identity checks**
+- [x] **Step 3: Add RED tests for custom controls and fail-closed identity checks**
 
 Before every direct `Insert(...)` in the focused tests, call `adapter.CaptureBeforePalette()`.
 
@@ -384,7 +389,7 @@ AssertThrows(() => staleService.Insert("single"), "does not reuse a snapshot aft
 AssertEqual("", staleAdapter.DirectText(), "does not type through a stale snapshot")
 ```
 
-- [ ] **Step 4: Run focused RED**
+- [x] **Step 4: Run focused RED**
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only snippets
@@ -392,7 +397,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only sn
 
 Expected: FAIL because production lacks `CaptureBeforePalette()`, custom controls are rejected, or clipboard restoration occurs without `WaitForPasteHandoff()`.
 
-- [ ] **Step 5: Implement target snapshot capture in `Win32InputAdapter`**
+- [x] **Step 5: Implement target snapshot capture in `Win32InputAdapter`**
 
 Add state and capture without requiring a standard focused control:
 
@@ -433,7 +438,7 @@ class Win32InputAdapter {
 }
 ```
 
-- [ ] **Step 6: Implement one-shot restore and validation**
+- [x] **Step 6: Implement one-shot restore and validation**
 
 Replace the old recapture-at-insert behavior:
 
@@ -503,7 +508,7 @@ ConfirmSafeTarget(targetSnapshot) {
 }
 ```
 
-- [ ] **Step 7: Add bounded clipboard handoff before restoration**
+- [x] **Step 7: Add bounded clipboard handoff before restoration**
 
 In `SnippetService.Insert(id)`, change the multiline transaction to:
 
@@ -529,7 +534,7 @@ WaitForPasteHandoff() {
 }
 ```
 
-- [ ] **Step 8: Run GREEN and module validation**
+- [x] **Step 8: Run GREEN and module validation**
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only snippets
@@ -538,7 +543,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only sn
 
 Expected: focused runner PASS; module validation exit 0; no new AutoHotkey test process remains.
 
-- [ ] **Step 9: Review and commit Task 2**
+- [x] **Step 9: Review and commit Task 2**
 
 ```powershell
 git diff --check
@@ -559,7 +564,7 @@ git commit -m "feat: support custom snippet targets"
 - Consumes: `CommandPalette(registry, context, targetHandoff)` and `SnippetService(snippets, inputAdapter, context)`.
 - Produces: exactly one `Win32InputAdapter` instance shared by the palette and snippet service during `InitializeHub(...)`.
 
-- [ ] **Step 1: Read composition and startup tests**
+- [x] **Step 1: Read composition and startup tests**
 
 ```powershell
 Get-Content -Raw main.ahk
@@ -567,7 +572,7 @@ Get-Content -Raw tests\main-startup-tests.ahk
 git status --short
 ```
 
-- [ ] **Step 2: Add RED composition assertions**
+- [x] **Step 2: Add RED composition assertions**
 
 Expose the shared adapter in the returned headless hub map so the test can assert identity without invoking Windows input:
 
@@ -578,7 +583,7 @@ AssertTrue(hub["palette"].targetHandoff = hub["inputAdapter"], "palette shares t
 AssertTrue(hub["registry"].Search("multiline-prompt").Length = 1, "registers multiline prompt snippet")
 ```
 
-- [ ] **Step 3: Run startup RED**
+- [x] **Step 3: Run startup RED**
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only main-startup
@@ -586,7 +591,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only ma
 
 Expected: FAIL because the hub map lacks `inputAdapter` and the palette has no shared target handoff.
 
-- [ ] **Step 4: Wire one adapter instance**
+- [x] **Step 4: Wire one adapter instance**
 
 In `InitializeHub(...)`:
 
@@ -614,7 +619,7 @@ return Map(
 
 The diagnostics-only path still creates the inert adapter but registers no configured snippet commands.
 
-- [ ] **Step 5: Run GREEN, main validation, and focused cross-module tests**
+- [x] **Step 5: Run GREEN, main validation, and focused cross-module tests**
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only main-startup,core,snippets
@@ -623,7 +628,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only ma
 
 Expected: three focused test files PASS and main validation exit 0.
 
-- [ ] **Step 6: Review and commit Task 3**
+- [x] **Step 6: Review and commit Task 3**
 
 ```powershell
 git diff --check
@@ -719,12 +724,15 @@ git commit -m "docs: explain multiline snippet targets"
 - [x] **Step 8: Final range and worktree audit**
 
 ```powershell
-git log --oneline -6
-git diff --check HEAD~4..HEAD
+git log --oneline --decorate 5deb5cd..HEAD
+git diff --check 5deb5cd..HEAD
 git status --short --branch
 ```
 
-Expected: four logical implementation commits after the spec commit, committed-range diff clean, and only intentional untracked `.superpowers/` reports remain.
+Expected: six logical implementation commits after the spec commit—three
+primary task commits plus three review-driven remediation commits—followed by
+the documentation commit. The committed-range diff is clean, and only the
+intentional untracked `.superpowers/` reports remain.
 
 ## Completion gate
 
