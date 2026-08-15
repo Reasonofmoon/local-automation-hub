@@ -118,4 +118,4 @@ Expected: `main.ahk` validates, tracked diff is clean, and `config/settings.loca
 
 - [x] **Step 6: Record completion without committing the local configuration**
 
-Update this plan's checkboxes and report the exact local entries, focused-test result, and restart instruction. Do not commit `config/settings.local.ini`; the design and plan commits are the only tracked artifacts.
+Update this plan's checkboxes and report the exact local entries, focused-test result, and restart instruction. Do not commit `config/settings.local.ini`; the local configuration remains uncommitted, while the plan record and config-driven startup regression are tracked logical artifacts in commits `2101417`, `1498ff1`, and `6710fdf`.
