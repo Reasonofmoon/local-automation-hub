@@ -30,76 +30,88 @@ class SnippetService {
         if !this.snippets.Has(id)
             throw Error("Unknown snippet: " id)
         targetSnapshot := this.inputAdapter.EnsureSafeTarget()
-        body := NormalizeSnippet(id, this.snippets[id])["body"]
-        if !InStr(body, "`n") {
-            this.inputAdapter.SendText(targetSnapshot, body)
-            return true
-        }
-
-        savedClipboard := this.inputAdapter.CaptureClipboard()
-        primaryError := ""
-        cleanupError := ""
         try {
-            try {
-                this.inputAdapter.SetClipboardText(body)
-                this.inputAdapter.Paste(targetSnapshot)
-            } catch as caughtError {
-                primaryError := caughtError
-            } finally {
-                try this.inputAdapter.WaitForPasteHandoff()
-                catch as waitError {
-                    cleanupError := waitError
-                }
-                try this.inputAdapter.RestoreClipboard(savedClipboard)
-                catch as restoreError {
-                    ; Wait is the first cleanup step, so it wins if both cleanup steps fail.
-                    if !IsObject(cleanupError)
-                        cleanupError := restoreError
-                }
-                savedClipboard := ""
+            body := NormalizeSnippet(id, this.snippets[id])["body"]
+            if !InStr(body, "`n") {
+                this.inputAdapter.SendText(targetSnapshot, body)
+                return true
             }
-        }
-        if IsObject(primaryError)
-            throw primaryError
-        if IsObject(cleanupError)
-            throw cleanupError
-        return true
+
+            savedClipboard := this.inputAdapter.CaptureClipboard()
+            primaryError := ""
+            cleanupError := ""
+            try {
+                try {
+                    this.inputAdapter.SetClipboardText(body)
+                    this.inputAdapter.Paste(targetSnapshot)
+                } catch as caughtError {
+                    primaryError := caughtError
+                } finally {
+                    try this.inputAdapter.WaitForPasteHandoff()
+                    catch as waitError {
+                        cleanupError := waitError
+                    }
+                    try this.inputAdapter.RestoreClipboard(savedClipboard)
+                    catch as restoreError {
+                        ; Wait is the first cleanup step, so it wins if both cleanup steps fail.
+                        if !IsObject(cleanupError)
+                            cleanupError := restoreError
+                    }
+                    savedClipboard := ""
+                }
+            }
+            if IsObject(primaryError)
+                throw primaryError
+            if IsObject(cleanupError)
+                throw cleanupError
+            return true
+        } finally {
+            if HasMethod(this.inputAdapter, "ReleaseTargetWatcher")
+                this.inputAdapter.ReleaseTargetWatcher(targetSnapshot)
+            }
     }
 }
 
 class Win32InputAdapter {
-    __New(postPasteDelayMs := 150) {
+    __New(postPasteDelayMs := 150, watcherApi := unset) {
         this.capturedTarget := ""
         this.postPasteDelayMs := Max(0, Integer(postPasteDelayMs))
+        if IsSet(watcherApi)
+            this.destroyWatcher := SnippetTargetWatcher(watcherApi)
+        else
+            this.destroyWatcher := SnippetTargetWatcher()
     }
 
     CaptureBeforePalette() {
-        this.capturedTarget := ""
+        this.ReleaseCapturedTarget()
         windowHandle := WinExist("A")
         if !windowHandle
             throw Error("Snippet insertion requires an active target before opening the palette")
 
         processId := WinGetPID("ahk_id " windowHandle)
-        focusedControl := ""
-        try focusedControl := ControlGetFocus("ahk_id " windowHandle)
-        controlHandle := 0
-        controlClass := ""
-        controlStyle := 0
-        if (focusedControl != "") {
-            try controlHandle := ControlGetHwnd(focusedControl, "ahk_id " windowHandle)
-            try controlClass := ControlGetClassNN(focusedControl, "ahk_id " windowHandle)
-            try controlStyle := ControlGetStyle(focusedControl, "ahk_id " windowHandle)
-        }
+        if !processId
+            throw Error("Snippet insertion target process is unavailable")
 
-        this.capturedTarget := Map(
-            "windowHandle", windowHandle,
-            "processId", processId,
-            "controlHandle", controlHandle,
-            "controlClass", controlClass,
-            "controlStyle", controlStyle,
-            "isStandardControl", controlHandle != 0 && IsStandardTextControl(controlClass)
-        )
-        return this.capturedTarget
+        watchGeneration := this.destroyWatcher.Replace(windowHandle, processId)
+        try {
+            controlHandle := this.GetFocusedControlHandle(windowHandle)
+            this.destroyWatcher.SetControlHandle(watchGeneration, controlHandle)
+            currentMetadata := this.ReadCurrentControlMetadata(windowHandle, controlHandle)
+            this.capturedTarget := Map(
+                "windowHandle", windowHandle,
+                "processId", processId,
+                "controlHandle", controlHandle,
+                "controlClass", currentMetadata["controlClass"],
+                "controlStyle", currentMetadata["controlStyle"],
+                "isStandardControl", IsStandardTextControl(currentMetadata["controlClass"]),
+                "watchGeneration", watchGeneration
+            )
+            this.ValidateTargetSnapshot(this.capturedTarget, true)
+            return this.capturedTarget
+        } catch as caughtError {
+            this.destroyWatcher.Release(watchGeneration)
+            throw caughtError
+        }
     }
 
     EnsureSafeTarget() {
@@ -108,96 +120,167 @@ class Win32InputAdapter {
 
         targetSnapshot := this.capturedTarget
         this.capturedTarget := ""
-        windowHandle := targetSnapshot["windowHandle"]
-        if !WinExist("ahk_id " windowHandle)
-            throw Error("Snippet insertion target no longer exists")
-        if WinGetPID("ahk_id " windowHandle) != targetSnapshot["processId"]
-            throw Error("Snippet insertion target process changed")
+        try {
+            this.RequireTargetWatcher(targetSnapshot)
+            windowHandle := targetSnapshot["windowHandle"]
+            if !WinExist("ahk_id " windowHandle)
+                throw Error("Snippet insertion target no longer exists")
+            if WinGetPID("ahk_id " windowHandle) != targetSnapshot["processId"]
+                throw Error("Snippet insertion target process changed")
 
-        targetProcessId := targetSnapshot["processId"]
-        if IsProcessElevated(targetProcessId) && !IsProcessElevated(DllCall("GetCurrentProcessId", "UInt"))
-            throw Error("Snippet insertion is blocked for elevated targets")
+            targetProcessId := targetSnapshot["processId"]
+            if IsProcessElevated(targetProcessId) && !IsProcessElevated(DllCall("GetCurrentProcessId", "UInt"))
+                throw Error("Snippet insertion is blocked for elevated targets")
 
-        this.ValidateTargetSnapshot(targetSnapshot, true)
+            this.ValidateTargetSnapshot(targetSnapshot, true)
 
-        WinActivate("ahk_id " windowHandle)
-        if !WinWaitActive("ahk_id " windowHandle, , 1)
-            throw Error("Snippet insertion target could not be activated")
+            WinActivate("ahk_id " windowHandle)
+            if !WinWaitActive("ahk_id " windowHandle, , 1)
+                throw Error("Snippet insertion target could not be activated")
 
-        if targetSnapshot["isStandardControl"] {
-            ControlFocus(targetSnapshot["controlHandle"], "ahk_id " windowHandle)
-            currentControl := ControlGetFocus("ahk_id " windowHandle)
-            currentControlHandle := currentControl = "" ? 0 : ControlGetHwnd(currentControl, "ahk_id " windowHandle)
-            if currentControlHandle != targetSnapshot["controlHandle"]
-                throw Error("Snippet insertion is blocked because focus changed before input")
+            if targetSnapshot["isStandardControl"]
+                ControlFocus(targetSnapshot["controlHandle"], "ahk_id " windowHandle)
+            this.ValidateFocusedTarget(targetSnapshot)
+            this.ValidateLiveTarget(targetSnapshot)
+            return targetSnapshot
+        } catch as caughtError {
+            this.ReleaseTargetWatcher(targetSnapshot)
+            throw caughtError
         }
-        return targetSnapshot
     }
 
     ConfirmSafeTarget(targetSnapshot) {
-        if !IsObject(targetSnapshot)
-            throw Error("Snippet insertion target snapshot is invalid")
-        for key in ["windowHandle", "processId", "controlHandle", "controlClass", "controlStyle", "isStandardControl"] {
-            if !targetSnapshot.Has(key)
+        try {
+            if !IsObject(targetSnapshot)
                 throw Error("Snippet insertion target snapshot is invalid")
-        }
-        windowHandle := targetSnapshot["windowHandle"]
-        if !WinExist("ahk_id " windowHandle)
-            throw Error("Snippet insertion target no longer exists")
-        if WinGetPID("ahk_id " windowHandle) != targetSnapshot["processId"]
-            throw Error("Snippet insertion target process changed")
-        if WinExist("A") != windowHandle
-            throw Error("Snippet insertion is blocked because focus changed before input")
-
-        targetProcessId := targetSnapshot["processId"]
-        if IsProcessElevated(targetProcessId) && !IsProcessElevated(DllCall("GetCurrentProcessId", "UInt"))
-            throw Error("Snippet insertion is blocked for elevated targets")
-
-        this.ValidateTargetSnapshot(targetSnapshot, true)
-        if targetSnapshot["controlHandle"] {
-            currentMetadata := ""
-            try currentMetadata := this.ReadCurrentControlMetadata(windowHandle, targetSnapshot["controlHandle"])
-            catch as metadataError {
-                if targetSnapshot["isStandardControl"]
-                    throw Error("Snippet insertion is blocked because the captured standard control metadata is unavailable")
-                return true
+            for key in ["windowHandle", "processId", "controlHandle", "controlClass", "controlStyle", "isStandardControl", "watchGeneration"] {
+                if !targetSnapshot.Has(key)
+                    throw Error("Snippet insertion target snapshot is invalid")
             }
-            ValidateCurrentControlMetadata(
-                targetSnapshot,
-                currentMetadata["controlClass"],
-                currentMetadata["controlStyle"],
-                currentMetadata["styleAvailable"]
-            )
-        } else {
-            ValidateCurrentControlMetadata(
-                targetSnapshot,
-                targetSnapshot["controlClass"],
-                targetSnapshot["controlStyle"]
-            )
-        }
-        if targetSnapshot["isStandardControl"] {
-            currentControl := ControlGetFocus("ahk_id " windowHandle)
-            currentControlHandle := currentControl = "" ? 0 : ControlGetHwnd(currentControl, "ahk_id " windowHandle)
-            if currentControlHandle != targetSnapshot["controlHandle"]
+            this.RequireTargetWatcher(targetSnapshot)
+            windowHandle := targetSnapshot["windowHandle"]
+            if !WinExist("ahk_id " windowHandle)
+                throw Error("Snippet insertion target no longer exists")
+            if WinGetPID("ahk_id " windowHandle) != targetSnapshot["processId"]
+                throw Error("Snippet insertion target process changed")
+            if WinExist("A") != windowHandle
                 throw Error("Snippet insertion is blocked because focus changed before input")
+
+            targetProcessId := targetSnapshot["processId"]
+            if IsProcessElevated(targetProcessId) && !IsProcessElevated(DllCall("GetCurrentProcessId", "UInt"))
+                throw Error("Snippet insertion is blocked for elevated targets")
+
+            this.ValidateTargetSnapshot(targetSnapshot, true)
+            this.ValidateFocusedTarget(targetSnapshot)
+            this.ValidateLiveTarget(targetSnapshot)
+            return true
+        } finally {
+            this.ReleaseTargetWatcher(targetSnapshot)
         }
-        return true
     }
 
     ReadCurrentControlMetadata(windowHandle, controlHandle) {
         if !controlHandle
             throw Error("Snippet insertion target control handle is unavailable")
-        controlTitle := "ahk_id " controlHandle
-        windowTitle := "ahk_id " windowHandle
-        controlClass := ControlGetClassNN(controlTitle, windowTitle)
-        if controlClass = ""
-            throw Error("Snippet insertion target control class is unavailable")
-        controlStyle := 0
-        styleAvailable := true
-        try controlStyle := ControlGetStyle(controlTitle, windowTitle)
-        catch
-            styleAvailable := false
-        return Map("controlClass", controlClass, "controlStyle", controlStyle, "styleAvailable", styleAvailable)
+        if !this.IsDescendantOfWindow(controlHandle, windowHandle)
+            throw Error("Snippet insertion target control is outside the captured window")
+        controlClass := this.GetWindowClassName(controlHandle)
+        controlStyle := this.GetWindowStyle(controlHandle)
+        return Map("controlClass", controlClass, "controlStyle", controlStyle, "styleAvailable", true)
+    }
+
+    GetFocusedControlHandle(windowHandle) {
+        focusedControl := ""
+        try focusedControl := ControlGetFocus("ahk_id " windowHandle)
+        controlHandle := 0
+        if (focusedControl != "")
+            try controlHandle := ControlGetHwnd(focusedControl, "ahk_id " windowHandle)
+        if !controlHandle
+            controlHandle := GetGUIThreadFocusHandle(windowHandle)
+        if !controlHandle
+            throw Error("Snippet insertion requires an exact focused control HWND")
+        if !this.IsDescendantOfWindow(controlHandle, windowHandle)
+            throw Error("Snippet insertion focused control is outside the captured window")
+        return controlHandle
+    }
+
+    ValidateFocusedTarget(targetSnapshot) {
+        currentControlHandle := this.GetFocusedControlHandle(targetSnapshot["windowHandle"])
+        if currentControlHandle != targetSnapshot["controlHandle"]
+            throw Error("Snippet insertion is blocked because focus changed before input")
+        return true
+    }
+
+    ValidateLiveTarget(targetSnapshot) {
+        currentMetadata := this.ReadCurrentControlMetadata(
+            targetSnapshot["windowHandle"],
+            targetSnapshot["controlHandle"]
+        )
+        ValidateCurrentControlMetadata(
+            targetSnapshot,
+            currentMetadata["controlClass"],
+            currentMetadata["controlStyle"],
+            currentMetadata["styleAvailable"]
+        )
+        return true
+    }
+
+    RequireTargetWatcher(targetSnapshot) {
+        if !IsObject(this.destroyWatcher)
+            throw Error("Snippet insertion destroy watcher is unavailable")
+        if !targetSnapshot.Has("watchGeneration")
+            throw Error("Snippet insertion target watcher identity is unavailable")
+        if this.destroyWatcher.IsInvalidated(targetSnapshot["watchGeneration"])
+            throw Error("Snippet insertion target was destroyed or recreated")
+        return true
+    }
+
+    ReleaseTargetWatcher(targetSnapshot) {
+        if IsObject(this.destroyWatcher) && IsObject(targetSnapshot) && targetSnapshot.Has("watchGeneration")
+            this.destroyWatcher.Release(targetSnapshot["watchGeneration"])
+        return true
+    }
+
+    ReleaseCapturedTarget() {
+        targetSnapshot := this.capturedTarget
+        this.capturedTarget := ""
+        if IsObject(this.destroyWatcher) {
+            cleanupSucceeded := IsObject(targetSnapshot) && targetSnapshot.Has("watchGeneration")
+                ? this.destroyWatcher.Release(targetSnapshot["watchGeneration"])
+                : this.destroyWatcher.Release()
+            if !cleanupSucceeded
+                throw Error("Snippet insertion destroy watcher cleanup failed")
+        }
+        return true
+    }
+
+    GetWindowClassName(controlHandle) {
+        classBuffer := Buffer(512, 0)
+        characterCount := DllCall("GetClassNameW", "Ptr", controlHandle, "Ptr", classBuffer, "Int", 256, "Int")
+        if !characterCount
+            throw Error("Snippet insertion target live control class is unavailable")
+        controlClass := StrGet(classBuffer, characterCount, "UTF-16")
+        if Trim(controlClass) = ""
+            throw Error("Snippet insertion target live control class is unavailable")
+        return controlClass
+    }
+
+    GetWindowStyle(controlHandle) {
+        DllCall("SetLastError", "UInt", 0)
+        style := DllCall(
+            A_PtrSize = 8 ? "GetWindowLongPtrW" : "GetWindowLongW",
+            "Ptr", controlHandle,
+            "Int", -16,
+            "Ptr"
+        )
+        if (style = 0 && A_LastError != 0)
+            throw Error("Snippet insertion target live control style is unavailable")
+        return Integer(style)
+    }
+
+    IsDescendantOfWindow(controlHandle, windowHandle) {
+        rootWindow := DllCall("GetAncestor", "Ptr", controlHandle, "UInt", 2, "Ptr")
+        return rootWindow = windowHandle
     }
 
     ValidateTargetSnapshot(targetSnapshot, allowCustomControl := false) {
@@ -207,12 +290,14 @@ class Win32InputAdapter {
             throw Error("Snippet insertion target snapshot is invalid")
         controlClass := targetSnapshot["controlClass"]
         controlStyle := targetSnapshot["controlStyle"]
+        if !targetSnapshot["controlHandle"]
+            throw Error("Snippet insertion is blocked because the focused control handle is unavailable")
+        if Trim(String(controlClass)) = ""
+            throw Error("Snippet insertion is blocked because the focused control class is unavailable")
         if IsPasswordControl(controlClass, controlStyle)
             throw Error("Snippet insertion is blocked for password controls")
         if allowCustomControl && !IsStandardTextControl(controlClass)
             return true
-        if !targetSnapshot["controlHandle"]
-            throw Error("Snippet insertion is blocked because the focused control handle is unavailable")
         if !IsStandardTextControl(controlClass)
             throw Error("Snippet insertion is blocked because the focused control is not a standard Edit or RichEdit control")
         return true
@@ -310,14 +395,16 @@ ValidateCurrentControlMetadata(targetSnapshot, currentControlClass, currentContr
             throw Error("Snippet insertion target snapshot is invalid")
     }
 
+    if !styleAvailable
+        throw Error("Snippet insertion is blocked because live target metadata is unavailable")
+    if Trim(String(currentControlClass)) = ""
+        throw Error("Snippet insertion is blocked because live target metadata is unavailable")
     if RegExMatch(String(currentControlClass), "i)(password|credential)")
         throw Error("Snippet insertion is blocked for password controls")
-    if styleAvailable && IsPasswordControl(currentControlClass, currentControlStyle)
+    if IsPasswordControl(currentControlClass, currentControlStyle)
         throw Error("Snippet insertion is blocked for password controls")
     if !targetSnapshot["isStandardControl"]
         return true
-    if !styleAvailable
-        throw Error("Snippet insertion is blocked because the captured standard control metadata is unavailable")
     if !IsStandardTextControl(currentControlClass)
         throw Error("Snippet insertion is blocked because the current control is not the captured standard control")
 
@@ -340,6 +427,162 @@ SameSnippetTarget(firstTarget, secondTarget) {
         && firstTarget["controlHandle"] = secondTarget["controlHandle"]
         && firstTarget["controlClass"] = secondTarget["controlClass"]
         && firstTarget["controlStyle"] = secondTarget["controlStyle"]
+}
+
+GetGUIThreadFocusHandle(windowHandle) {
+    processId := 0
+    threadId := DllCall("GetWindowThreadProcessId", "Ptr", windowHandle, "UInt*", &processId, "UInt")
+    if !threadId
+        throw Error("Snippet insertion target GUI thread is unavailable")
+    structureSize := A_PtrSize = 8 ? 72 : 48
+    guiThreadInfo := Buffer(structureSize, 0)
+    NumPut("UInt", structureSize, guiThreadInfo, 0)
+    if !DllCall("GetGUIThreadInfo", "UInt", threadId, "Ptr", guiThreadInfo.Ptr)
+        throw Error("Snippet insertion target focused HWND is unavailable")
+    return NumGet(guiThreadInfo, 8 + A_PtrSize, "Ptr")
+}
+
+class SnippetTargetWatcher {
+    __New(watchApi := unset, expiryMs := 30000) {
+        if IsSet(watchApi)
+            this.watchApi := watchApi
+        else
+            this.watchApi := Win32WinEventApi()
+        this.registration := ""
+        this.generation := 0
+        this.expiryMs := Max(0, Integer(expiryMs))
+        this.expiryCallback := ""
+        this.lastCleanupError := ""
+    }
+
+    __Delete() {
+        this.Release()
+    }
+
+    Replace(windowHandle, processId, controlHandle := 0) {
+        if !this.Release()
+            throw Error("Snippet insertion destroy watcher cleanup failed")
+        this.generation += 1
+        generation := this.generation
+        callback := ObjBindMethod(this, "OnWinEvent", generation)
+        registration := this.watchApi.Install(windowHandle, processId, controlHandle, callback)
+        if !IsObject(registration)
+            throw Error("Snippet insertion destroy watcher could not be installed")
+        registration["generation"] := generation
+        registration["windowHandle"] := windowHandle
+        registration["processId"] := processId
+        registration["controlHandle"] := controlHandle
+        registration["invalidated"] := false
+        this.registration := registration
+        if this.expiryMs > 0 {
+            this.expiryCallback := ObjBindMethod(this, "Expire", generation)
+            SetTimer(this.expiryCallback, -this.expiryMs)
+        }
+        return generation
+    }
+
+    SetControlHandle(generation, controlHandle) {
+        if !IsObject(this.registration) || this.registration["generation"] != generation
+            throw Error("Snippet insertion destroy watcher identity is unavailable")
+        this.registration["controlHandle"] := controlHandle
+        return true
+    }
+
+    IsInvalidated(generation) {
+        if !IsObject(this.registration) || this.registration["generation"] != generation
+            throw Error("Snippet insertion destroy watcher identity is unavailable")
+        return this.registration["invalidated"]
+    }
+
+    Release(generation := 0) {
+        if !IsObject(this.registration)
+            return true
+        if generation && this.registration["generation"] != generation
+            return true
+        registration := this.registration
+        this.registration := ""
+        if IsObject(this.expiryCallback) {
+            try SetTimer(this.expiryCallback, 0)
+            this.expiryCallback := ""
+        }
+        this.lastCleanupError := ""
+        try {
+            this.watchApi.Uninstall(registration)
+        } catch as cleanupError {
+            this.lastCleanupError := cleanupError
+        }
+        return !IsObject(this.lastCleanupError)
+    }
+
+    Expire(generation) {
+        if IsObject(this.registration) && this.registration["generation"] = generation {
+            this.registration["invalidated"] := true
+            this.Release(generation)
+        }
+    }
+
+    OnWinEvent(generation, hookHandle, event, windowHandle, objectId, childId, eventThreadId, eventTime) {
+        if !IsObject(this.registration) || this.registration["generation"] != generation
+            return
+        if (event != 0x8001 || hookHandle != this.registration["hook"])
+            return
+        if (windowHandle = this.registration["windowHandle"]
+            || (this.registration["controlHandle"] && windowHandle = this.registration["controlHandle"]))
+            this.registration["invalidated"] := true
+    }
+}
+
+class Win32WinEventApi {
+    Install(windowHandle, processId, controlHandle, callback) {
+        callbackPointer := CallbackCreate(callback, "Fast")
+        try {
+            hookHandle := DllCall(
+                "SetWinEventHook",
+                "UInt", 0x8001,
+                "UInt", 0x8001,
+                "Ptr", 0,
+                "Ptr", callbackPointer,
+                "UInt", processId,
+                "UInt", 0,
+                "UInt", 0,
+                "Ptr"
+            )
+            if !hookHandle
+                throw Error("Snippet insertion destroy watcher could not be installed")
+            return Map(
+                "hook", hookHandle,
+                "callback", callbackPointer,
+                "windowHandle", windowHandle,
+                "processId", processId,
+                "controlHandle", controlHandle
+            )
+        } catch {
+            CallbackFree(callbackPointer)
+            throw
+        }
+    }
+
+    Uninstall(registration) {
+        primaryError := ""
+        if registration["hook"] {
+            try {
+                if !DllCall("UnhookWinEvent", "Ptr", registration["hook"])
+                    throw Error("Snippet insertion destroy watcher cleanup failed")
+            } catch as cleanupError {
+                primaryError := cleanupError
+            }
+        }
+        if registration["callback"] {
+            try CallbackFree(registration["callback"])
+            catch as cleanupError {
+                if !IsObject(primaryError)
+                    primaryError := cleanupError
+            }
+        }
+        if IsObject(primaryError)
+            throw primaryError
+        return true
+    }
 }
 
 IsProcessElevated(processId) {
