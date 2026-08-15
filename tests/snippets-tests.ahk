@@ -193,6 +193,8 @@ class FakeWinEventApi {
         this._registrations := []
         this.installCount := 0
         this.uninstallCount := 0
+        this.uninstallAttempts := 0
+        this.failUninstall := false
     }
 
     Install(windowHandle, processId, controlHandle, callback) {
@@ -203,7 +205,8 @@ class FakeWinEventApi {
             "processId", processId,
             "controlHandle", controlHandle,
             "callback", callback,
-            "uninstalled", false
+            "uninstalled", false,
+            "callbackFreed", false
         )
         this._nextHook += 1
         this._registrations.Push(registration)
@@ -211,20 +214,105 @@ class FakeWinEventApi {
     }
 
     Uninstall(registration) {
+        this.uninstallAttempts += 1
+        if this.failUninstall
+            throw Error("Uninstall failed")
         this.uninstallCount += 1
         registration["uninstalled"] := true
+        registration["callbackFreed"] := true
+        return true
     }
 
-    RaiseDestroy(registration, destroyedHandle) {
+    RaiseDestroy(registration, destroyedHandle, objectId := 0, childId := 0, event := 0x8001) {
         registration["callback"](
             registration["hook"],
-            0x8001,
+            event,
             destroyedHandle,
-            -1,
-            0,
+            objectId,
+            childId,
             0,
             0
         )
+    }
+}
+
+class FakeWin32InputBoundary {
+    __New() {
+        this.adapter := ""
+        this._activeWindow := 100
+        this._processId := 200
+        this._controlHandle := 300
+        this._controlClass := "Edit"
+        this._controlStyle := 0
+        this.sendTextCount := 0
+        this.pasteCount := 0
+        this.sendTextWhileWatched := false
+        this.pasteWhileWatched := false
+        this.failSendText := false
+    }
+
+    ActiveWindow() {
+        return this._activeWindow
+    }
+
+    WindowExists(windowHandle) {
+        return windowHandle = this._activeWindow
+    }
+
+    ProcessId(windowHandle) {
+        return windowHandle = this._activeWindow ? this._processId : 0
+    }
+
+    GetFocusedControlHandle(windowHandle) {
+        return windowHandle = this._activeWindow ? this._controlHandle : 0
+    }
+
+    IsDescendantOfWindow(controlHandle, windowHandle) {
+        return controlHandle = this._controlHandle && windowHandle = this._activeWindow
+    }
+
+    GetWindowClassName(controlHandle) {
+        return controlHandle = this._controlHandle ? this._controlClass : ""
+    }
+
+    GetWindowStyle(controlHandle) {
+        return controlHandle = this._controlHandle ? this._controlStyle : 0
+    }
+
+    Activate(windowHandle) {
+        this._activeWindow := windowHandle
+    }
+
+    WaitActive(windowHandle, timeoutSeconds := 1) {
+        return windowHandle = this._activeWindow
+    }
+
+    Focus(controlHandle, windowHandle) {
+        this._controlHandle := controlHandle
+        this._activeWindow := windowHandle
+    }
+
+    TargetProcessIsElevated(processId) {
+        return false
+    }
+
+    CurrentProcessIsElevated() {
+        return false
+    }
+
+    SendTextToTarget(text) {
+        this.sendTextCount += 1
+        this.sendTextWhileWatched := IsObject(this.adapter)
+            && IsObject(this.adapter.destroyWatcher.registration)
+        this.lastText := String(text)
+        if this.failSendText
+            throw Error("Input failed")
+    }
+
+    PasteToTarget() {
+        this.pasteCount += 1
+        this.pasteWhileWatched := IsObject(this.adapter)
+            && IsObject(this.adapter.destroyWatcher.registration)
     }
 }
 
@@ -412,11 +500,80 @@ AssertTrue(targetWatcher.IsInvalidated(secondGeneration), "tracks destruction fo
 targetWatcher.Release(secondGeneration)
 AssertEqual(2, watchApi.uninstallCount, "cleans up the replacement watcher")
 
+subobjectWatcher := SnippetTargetWatcher(watchApi)
+subobjectGeneration := subobjectWatcher.Replace(100, 200, 300)
+subobjectRegistration := watchApi._registrations[3]
+watchApi.RaiseDestroy(subobjectRegistration, 100, 1, 0)
+AssertFalse(subobjectWatcher.IsInvalidated(subobjectGeneration), "ignores non-window accessibility object destruction")
+watchApi.RaiseDestroy(subobjectRegistration, 100, 0, 1)
+AssertFalse(subobjectWatcher.IsInvalidated(subobjectGeneration), "ignores child accessibility object destruction")
+watchApi.RaiseDestroy(subobjectRegistration, 100, 0, 0, 0x8000)
+AssertFalse(subobjectWatcher.IsInvalidated(subobjectGeneration), "ignores non-destroy accessibility events")
+watchApi.RaiseDestroy(subobjectRegistration, 100, 0, 0)
+AssertTrue(subobjectWatcher.IsInvalidated(subobjectGeneration), "accepts exact top-level window destruction")
+subobjectWatcher.Release(subobjectGeneration)
+AssertEqual(3, watchApi.uninstallCount, "cleans up the object-filtered watcher")
+
+failedReleaseApi := FakeWinEventApi()
+failedReleaseWatcher := SnippetTargetWatcher(failedReleaseApi)
+failedReleaseGeneration := failedReleaseWatcher.Replace(100, 200, 300)
+failedReleaseRegistration := failedReleaseApi._registrations[1]
+failedReleaseApi.failUninstall := true
+AssertFalse(failedReleaseWatcher.Release(failedReleaseGeneration), "reports a watcher uninstall failure")
+AssertTrue(IsObject(failedReleaseWatcher.registration), "retains registration after uninstall failure")
+AssertFalse(failedReleaseRegistration["uninstalled"], "does not discard the hook after uninstall failure")
+AssertFalse(failedReleaseRegistration["callbackFreed"], "does not free the callback after unhook failure")
+failedReleaseApi.failUninstall := false
+AssertTrue(failedReleaseWatcher.Release(failedReleaseGeneration), "retries watcher cleanup deterministically")
+AssertEqual(2, failedReleaseApi.uninstallAttempts, "retries the retained watcher registration")
+AssertTrue(failedReleaseRegistration["callbackFreed"], "frees the callback only after successful unhook")
+
+productionWatchApi := FakeWinEventApi()
+productionBoundary := FakeWin32InputBoundary()
+productionAdapter := Win32InputAdapter(0, productionWatchApi, productionBoundary)
+productionBoundary.adapter := productionAdapter
+productionSnapshot := productionAdapter.CaptureBeforePalette()
+productionAdapter.EnsureSafeTarget()
+AssertTrue(IsObject(productionAdapter.destroyWatcher.registration), "keeps production watcher through target restoration")
+productionAdapter.SendText(productionSnapshot, "safe")
+AssertTrue(productionBoundary.sendTextWhileWatched, "keeps production watcher through final confirmation and direct input")
+productionAdapter.CompleteTarget(productionSnapshot)
+AssertFalse(IsObject(productionAdapter.destroyWatcher.registration), "releases production watcher after direct input attempt")
+
+productionPasteWatchApi := FakeWinEventApi()
+productionPasteBoundary := FakeWin32InputBoundary()
+productionPasteAdapter := Win32InputAdapter(0, productionPasteWatchApi, productionPasteBoundary)
+productionPasteBoundary.adapter := productionPasteAdapter
+productionPasteSnapshot := productionPasteAdapter.CaptureBeforePalette()
+productionPasteAdapter.EnsureSafeTarget()
+productionPasteAdapter.Paste(productionPasteSnapshot)
+AssertTrue(productionPasteBoundary.pasteWhileWatched, "keeps production watcher through final confirmation and paste input")
+productionPasteAdapter.CompleteTarget(productionPasteSnapshot)
+AssertFalse(IsObject(productionPasteAdapter.destroyWatcher.registration), "releases production watcher after paste input attempt")
+
+cleanupPrecedenceWatchApi := FakeWinEventApi()
+cleanupPrecedenceBoundary := FakeWin32InputBoundary()
+cleanupPrecedenceAdapter := Win32InputAdapter(0, cleanupPrecedenceWatchApi, cleanupPrecedenceBoundary)
+cleanupPrecedenceBoundary.adapter := cleanupPrecedenceAdapter
+cleanupPrecedenceAdapter.CaptureBeforePalette()
+cleanupPrecedenceBoundary.failSendText := true
+cleanupPrecedenceWatchApi.failUninstall := true
+cleanupPrecedenceService := SnippetService(Map("single", "safe"), cleanupPrecedenceAdapter)
+AssertThrowsWithMessage(
+    () => cleanupPrecedenceService.Insert("single"),
+    "Input failed",
+    "preserves the primary input error when watcher cleanup also fails"
+)
+AssertTrue(IsObject(cleanupPrecedenceAdapter.destroyWatcher.registration), "retains the watcher after cleanup failure during input")
+cleanupPrecedenceWatchApi.failUninstall := false
+cleanupPrecedenceBoundary.failSendText := false
+AssertTrue(cleanupPrecedenceAdapter.destroyWatcher.Release(), "allows watcher cleanup retry after the primary error")
+
 boundedWatcher := SnippetTargetWatcher(watchApi, 30000)
 boundedGeneration := boundedWatcher.Replace(100, 200, 300)
 boundedWatcher.Expire(boundedGeneration)
 AssertThrows(() => boundedWatcher.IsInvalidated(boundedGeneration), "expires a watcher that outlives a cancelled palette")
-AssertEqual(3, watchApi.uninstallCount, "cleans up an expired watcher")
+AssertEqual(4, watchApi.uninstallCount, "cleans up an expired watcher")
 
 destroyedAdapter := FakeInputAdapter("before")
 destroyedAdapter.CaptureBeforePalette()
