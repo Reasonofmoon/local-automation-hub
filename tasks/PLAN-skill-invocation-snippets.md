@@ -98,7 +98,7 @@ Run the exact PowerShell check from Step 1.
 
 Expected: exit `0`, with exactly eighteen entries and no `student-feedback` or `multiline-prompt` difference.
 
-- [ ] **Step 4: Run focused product regressions**
+- [x] **Step 4: Run focused product regressions**
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only snippets,main-startup

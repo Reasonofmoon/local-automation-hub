@@ -21,10 +21,6 @@ if (startupError = "") {
     startupSnippetService := startupHub["snippets"]
     for snippetId, _ in startupSnippetService.snippets
         AssertEqual(1, CountStartupCommandId(startupRegistry, "snippet." snippetId), "registers configured snippet command: " snippetId)
-    for approvedSkillId in ["skill-brainstorming", "skill-research"] {
-        if startupSnippetService.snippets.Has(approvedSkillId)
-            AssertEqual(1, CountStartupCommandId(startupRegistry, "snippet." approvedSkillId), "registers approved local skill snippet: " approvedSkillId)
-    }
     AssertTrue(startupRegistry.Search("workspace").Length > 0, "startup registers workspace commands")
     startupHasOrcaCommand := false
     for _, startupCommand in startupRegistry.All() {
