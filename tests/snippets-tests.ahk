@@ -195,6 +195,7 @@ class FakeWinEventApi {
         this.uninstallCount := 0
         this.uninstallAttempts := 0
         this.failUninstall := false
+        this.eventLog := ""
     }
 
     Install(windowHandle, processId, controlHandle, callback) {
@@ -215,12 +216,18 @@ class FakeWinEventApi {
 
     Uninstall(registration) {
         this.uninstallAttempts += 1
+        this.RecordEvent("unhook")
         if this.failUninstall
             throw Error("Uninstall failed")
         this.uninstallCount += 1
         registration["uninstalled"] := true
         registration["callbackFreed"] := true
         return true
+    }
+
+    RecordEvent(eventName) {
+        if IsObject(this.eventLog)
+            this.eventLog.Push(eventName)
     }
 
     RaiseDestroy(registration, destroyedHandle, objectId := 0, childId := 0, event := 0x8001) {
@@ -249,6 +256,8 @@ class FakeWin32InputBoundary {
         this.sendTextWhileWatched := false
         this.pasteWhileWatched := false
         this.failSendText := false
+        this.failPaste := false
+        this.eventLog := ""
     }
 
     ActiveWindow() {
@@ -302,6 +311,7 @@ class FakeWin32InputBoundary {
 
     SendTextToTarget(text) {
         this.sendTextCount += 1
+        this.RecordEvent("send")
         this.sendTextWhileWatched := IsObject(this.adapter)
             && IsObject(this.adapter.destroyWatcher.registration)
         this.lastText := String(text)
@@ -311,8 +321,48 @@ class FakeWin32InputBoundary {
 
     PasteToTarget() {
         this.pasteCount += 1
+        this.RecordEvent("paste")
         this.pasteWhileWatched := IsObject(this.adapter)
             && IsObject(this.adapter.destroyWatcher.registration)
+        if this.failPaste
+            throw Error("Paste failed")
+    }
+
+    RecordEvent(eventName) {
+        if IsObject(this.eventLog)
+            this.eventLog.Push(eventName)
+    }
+}
+
+class FakeClipboardInputAdapter extends Win32InputAdapter {
+    __New(watchApi, targetBoundary, clipboardText, eventLog) {
+        super.__New(0, watchApi, targetBoundary)
+        this._testClipboardText := String(clipboardText)
+        this._eventLog := eventLog
+    }
+
+    CaptureClipboard() {
+        this._eventLog.Push("capture")
+        return this._testClipboardText
+    }
+
+    SetClipboardText(text) {
+        this._eventLog.Push("set")
+        this._testClipboardText := String(text)
+    }
+
+    RestoreClipboard(value) {
+        this._eventLog.Push("restore")
+        this._testClipboardText := String(value)
+    }
+
+    WaitForPasteHandoff() {
+        this._eventLog.Push("wait")
+        return true
+    }
+
+    ClipboardText() {
+        return this._testClipboardText
     }
 }
 
@@ -528,29 +578,6 @@ AssertTrue(failedReleaseWatcher.Release(failedReleaseGeneration), "retries watch
 AssertEqual(2, failedReleaseApi.uninstallAttempts, "retries the retained watcher registration")
 AssertTrue(failedReleaseRegistration["callbackFreed"], "frees the callback only after successful unhook")
 
-productionWatchApi := FakeWinEventApi()
-productionBoundary := FakeWin32InputBoundary()
-productionAdapter := Win32InputAdapter(0, productionWatchApi, productionBoundary)
-productionBoundary.adapter := productionAdapter
-productionSnapshot := productionAdapter.CaptureBeforePalette()
-productionAdapter.EnsureSafeTarget()
-AssertTrue(IsObject(productionAdapter.destroyWatcher.registration), "keeps production watcher through target restoration")
-productionAdapter.SendText(productionSnapshot, "safe")
-AssertTrue(productionBoundary.sendTextWhileWatched, "keeps production watcher through final confirmation and direct input")
-productionAdapter.CompleteTarget(productionSnapshot)
-AssertFalse(IsObject(productionAdapter.destroyWatcher.registration), "releases production watcher after direct input attempt")
-
-productionPasteWatchApi := FakeWinEventApi()
-productionPasteBoundary := FakeWin32InputBoundary()
-productionPasteAdapter := Win32InputAdapter(0, productionPasteWatchApi, productionPasteBoundary)
-productionPasteBoundary.adapter := productionPasteAdapter
-productionPasteSnapshot := productionPasteAdapter.CaptureBeforePalette()
-productionPasteAdapter.EnsureSafeTarget()
-productionPasteAdapter.Paste(productionPasteSnapshot)
-AssertTrue(productionPasteBoundary.pasteWhileWatched, "keeps production watcher through final confirmation and paste input")
-productionPasteAdapter.CompleteTarget(productionPasteSnapshot)
-AssertFalse(IsObject(productionPasteAdapter.destroyWatcher.registration), "releases production watcher after paste input attempt")
-
 cleanupPrecedenceWatchApi := FakeWinEventApi()
 cleanupPrecedenceBoundary := FakeWin32InputBoundary()
 cleanupPrecedenceAdapter := Win32InputAdapter(0, cleanupPrecedenceWatchApi, cleanupPrecedenceBoundary)
@@ -568,6 +595,151 @@ AssertTrue(IsObject(cleanupPrecedenceAdapter.destroyWatcher.registration), "reta
 cleanupPrecedenceWatchApi.failUninstall := false
 cleanupPrecedenceBoundary.failSendText := false
 AssertTrue(cleanupPrecedenceAdapter.destroyWatcher.Release(), "allows watcher cleanup retry after the primary error")
+
+directSuccessEvents := []
+directSuccessWatchApi := FakeWinEventApi()
+directSuccessWatchApi.eventLog := directSuccessEvents
+directSuccessBoundary := FakeWin32InputBoundary()
+directSuccessBoundary.eventLog := directSuccessEvents
+directSuccessAdapter := FakeClipboardInputAdapter(
+    directSuccessWatchApi,
+    directSuccessBoundary,
+    "before",
+    directSuccessEvents
+)
+directSuccessBoundary.adapter := directSuccessAdapter
+directSuccessAdapter.CaptureBeforePalette()
+directSuccessService := SnippetService(Map("single", "safe"), directSuccessAdapter)
+AssertTrue(directSuccessService.Insert("single"), "inserts a single-line snippet through the production adapter")
+AssertTrue(directSuccessBoundary.sendTextWhileWatched, "keeps the watcher installed during successful direct input")
+AssertEqual("send,unhook", JoinEventNames(directSuccessEvents), "unhooks after successful direct input")
+AssertEqual(1, directSuccessWatchApi.uninstallAttempts, "service finally attempts direct-input watcher cleanup")
+AssertEqual(1, directSuccessWatchApi.uninstallCount, "successful direct-input cleanup unhooks once")
+AssertFalse(IsObject(directSuccessAdapter.destroyWatcher.registration), "service finally clears the direct-input registration")
+
+directFailureEvents := []
+directFailureWatchApi := FakeWinEventApi()
+directFailureWatchApi.eventLog := directFailureEvents
+directFailureBoundary := FakeWin32InputBoundary()
+directFailureBoundary.eventLog := directFailureEvents
+directFailureBoundary.failSendText := true
+directFailureAdapter := FakeClipboardInputAdapter(
+    directFailureWatchApi,
+    directFailureBoundary,
+    "before",
+    directFailureEvents
+)
+directFailureBoundary.adapter := directFailureAdapter
+directFailureAdapter.CaptureBeforePalette()
+directFailureService := SnippetService(Map("single", "safe"), directFailureAdapter)
+AssertThrowsWithMessage(
+    () => directFailureService.Insert("single"),
+    "Input failed",
+    "surfaces direct input failure while still entering service finally"
+)
+AssertTrue(directFailureBoundary.sendTextWhileWatched, "keeps the watcher installed during failed direct input")
+AssertEqual("send,unhook", JoinEventNames(directFailureEvents), "unhooks after failed direct input")
+AssertEqual(1, directFailureWatchApi.uninstallAttempts, "service finally attempts cleanup after direct input failure")
+AssertEqual(1, directFailureWatchApi.uninstallCount, "successfully unhooks after direct input failure")
+AssertFalse(IsObject(directFailureAdapter.destroyWatcher.registration), "service finally clears the failed direct-input registration")
+
+multilineSuccessEvents := []
+multilineSuccessWatchApi := FakeWinEventApi()
+multilineSuccessWatchApi.eventLog := multilineSuccessEvents
+multilineSuccessBoundary := FakeWin32InputBoundary()
+multilineSuccessBoundary.eventLog := multilineSuccessEvents
+multilineSuccessAdapter := FakeClipboardInputAdapter(
+    multilineSuccessWatchApi,
+    multilineSuccessBoundary,
+    "before",
+    multilineSuccessEvents
+)
+multilineSuccessBoundary.adapter := multilineSuccessAdapter
+multilineSuccessAdapter.CaptureBeforePalette()
+multilineSuccessService := SnippetService(
+    Map("multi", "line 1`nline 2"),
+    multilineSuccessAdapter
+)
+AssertTrue(multilineSuccessService.Insert("multi"), "inserts a multiline snippet through the production adapter")
+AssertEqual("before", multilineSuccessAdapter.ClipboardText(), "restores the fake clipboard after multiline success")
+AssertTrue(multilineSuccessBoundary.pasteWhileWatched, "keeps the watcher installed during successful paste")
+AssertEqual(
+    "capture,set,paste,wait,restore,unhook",
+    JoinEventNames(multilineSuccessEvents),
+    "waits and restores the clipboard before service finally unhooks"
+)
+AssertEqual(1, multilineSuccessWatchApi.uninstallAttempts, "service finally attempts multiline watcher cleanup")
+AssertFalse(IsObject(multilineSuccessAdapter.destroyWatcher.registration), "service finally clears the multiline registration")
+
+multilineFailureEvents := []
+multilineFailureWatchApi := FakeWinEventApi()
+multilineFailureWatchApi.eventLog := multilineFailureEvents
+multilineFailureBoundary := FakeWin32InputBoundary()
+multilineFailureBoundary.eventLog := multilineFailureEvents
+multilineFailureBoundary.failPaste := true
+multilineFailureAdapter := FakeClipboardInputAdapter(
+    multilineFailureWatchApi,
+    multilineFailureBoundary,
+    "before",
+    multilineFailureEvents
+)
+multilineFailureBoundary.adapter := multilineFailureAdapter
+multilineFailureAdapter.CaptureBeforePalette()
+multilineFailureService := SnippetService(
+    Map("multi", "line 1`nline 2"),
+    multilineFailureAdapter
+)
+AssertThrowsWithMessage(
+    () => multilineFailureService.Insert("multi"),
+    "Paste failed",
+    "surfaces paste failure while still entering service finally"
+)
+AssertEqual("before", multilineFailureAdapter.ClipboardText(), "restores the fake clipboard after paste failure")
+AssertTrue(multilineFailureBoundary.pasteWhileWatched, "keeps the watcher installed during failed paste")
+AssertEqual(
+    "capture,set,paste,wait,restore,unhook",
+    JoinEventNames(multilineFailureEvents),
+    "waits and restores the clipboard before unhooking after paste failure"
+)
+AssertEqual(1, multilineFailureWatchApi.uninstallAttempts, "service finally attempts cleanup after paste failure")
+AssertEqual(1, multilineFailureWatchApi.uninstallCount, "successfully unhooks after paste failure")
+AssertFalse(IsObject(multilineFailureAdapter.destroyWatcher.registration), "service finally clears the failed-paste registration")
+
+unhookFailureEvents := []
+unhookFailureWatchApi := FakeWinEventApi()
+unhookFailureWatchApi.eventLog := unhookFailureEvents
+unhookFailureWatchApi.failUninstall := true
+unhookFailureBoundary := FakeWin32InputBoundary()
+unhookFailureBoundary.eventLog := unhookFailureEvents
+unhookFailureAdapter := FakeClipboardInputAdapter(
+    unhookFailureWatchApi,
+    unhookFailureBoundary,
+    "before",
+    unhookFailureEvents
+)
+unhookFailureBoundary.adapter := unhookFailureAdapter
+unhookFailureAdapter.CaptureBeforePalette()
+unhookFailureService := SnippetService(Map("single", "safe"), unhookFailureAdapter)
+AssertThrowsWithMessage(
+    () => unhookFailureService.Insert("single"),
+    "Snippet insertion destroy watcher cleanup failed",
+    "surfaces a final watcher cleanup failure"
+)
+failedServiceRegistration := unhookFailureAdapter.destroyWatcher.registration
+AssertEqual("send,unhook", JoinEventNames(unhookFailureEvents), "service finally attempts unhook when cleanup fails")
+AssertEqual(1, unhookFailureWatchApi.uninstallAttempts, "service finally actually attempts the failed unhook")
+AssertEqual(0, unhookFailureWatchApi.uninstallCount, "failed unhook is not counted as successful cleanup")
+AssertTrue(IsObject(failedServiceRegistration), "retains the registration after service cleanup failure")
+AssertFalse(failedServiceRegistration["uninstalled"], "retains the hook after service cleanup failure")
+AssertFalse(failedServiceRegistration["callbackFreed"], "retains the callback after service cleanup failure")
+unhookFailureWatchApi.failUninstall := false
+AssertTrue(
+    unhookFailureAdapter.destroyWatcher.Release(),
+    "retained service cleanup can retry after the unhook failure"
+)
+AssertEqual(2, unhookFailureWatchApi.uninstallAttempts, "retry makes a second unhook attempt")
+AssertTrue(failedServiceRegistration["callbackFreed"], "retry frees the callback only after unhook succeeds")
+AssertFalse(IsObject(unhookFailureAdapter.destroyWatcher.registration), "retry clears the retained registration")
 
 boundedWatcher := SnippetTargetWatcher(watchApi, 30000)
 boundedGeneration := boundedWatcher.Replace(100, 200, 300)
@@ -673,6 +845,13 @@ AssertEqual("snippet.feedback", fakeRegistry.CommandIds()[1], "registers one pal
 AssertEqual("snippet.meeting", fakeRegistry.CommandIds()[2], "uses each snippet config id in palette command")
 
 ExitWithTestResult()
+
+JoinEventNames(events) {
+    result := ""
+    for index, eventName in events
+        result .= (index = 1 ? "" : ",") eventName
+    return result
+}
 
 AssertThrowsWithMessage(callback, expectedMessage, message) {
     global TestFailures
