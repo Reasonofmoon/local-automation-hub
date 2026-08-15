@@ -833,6 +833,46 @@ staleService := SnippetService(Map("single", "safe"), staleAdapter)
 AssertThrows(() => staleService.Insert("single"), "does not reuse a snapshot after capture failure")
 AssertEqual("", staleAdapter.DirectText(), "does not type through a stale snapshot")
 
+staleProductionWatchApi := FakeWinEventApi()
+staleProductionBoundary := FakeWin32InputBoundary()
+staleProductionAdapter := Win32InputAdapter(0, staleProductionWatchApi, staleProductionBoundary)
+staleProductionBoundary.adapter := staleProductionAdapter
+staleProductionAdapter.CaptureBeforePalette()
+staleProductionWatchApi.failUninstall := true
+AssertThrows(
+    () => staleProductionAdapter.CaptureBeforePalette(),
+    "reports watcher cleanup failure during a replacement capture"
+)
+staleProductionService := SnippetService(Map("single", "safe"), staleProductionAdapter)
+AssertThrows(
+    () => staleProductionService.Insert("single"),
+    "rejects insertion after failed replacement capture without a stale snapshot"
+)
+AssertEqual(0, staleProductionBoundary.sendTextCount, "does not send through a stale production snapshot")
+AssertTrue(
+    IsObject(staleProductionAdapter.destroyWatcher.registration),
+    "retains the failed replacement watcher registration for retry"
+)
+failedStaleProductionRegistration := staleProductionAdapter.destroyWatcher.registration
+AssertFalse(
+    failedStaleProductionRegistration["callbackFreed"],
+    "retains the failed replacement watcher callback for retry"
+)
+staleProductionWatchApi.failUninstall := false
+AssertTrue(
+    staleProductionAdapter.destroyWatcher.Release(),
+    "retries failed replacement watcher cleanup after stale capture rejection"
+)
+AssertEqual(2, staleProductionWatchApi.uninstallAttempts, "retries replacement watcher cleanup")
+AssertTrue(
+    failedStaleProductionRegistration["callbackFreed"],
+    "frees the replacement watcher callback only after retry succeeds"
+)
+AssertFalse(
+    IsObject(staleProductionAdapter.destroyWatcher.registration),
+    "clears the replacement watcher after retry succeeds"
+)
+
 searchService := SnippetService(Map(
     "feedback", Map("title", "Feedback", "tags", ["lesson", "student"], "body", "Great work!"),
     "meeting", Map("title", "Meeting", "tags", ["calendar"], "body", "Agenda")

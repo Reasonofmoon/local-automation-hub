@@ -266,6 +266,9 @@ class Win32InputAdapter {
 
     ReleaseCapturedTarget() {
         targetSnapshot := this.capturedTarget
+        ; Invalidate the handoff before cleanup so a failed unhook cannot leave
+        ; a stale snapshot available to the next palette invocation.
+        this.capturedTarget := ""
         if IsObject(this.destroyWatcher) {
             cleanupSucceeded := IsObject(targetSnapshot) && targetSnapshot.Has("watchGeneration")
                 ? this.destroyWatcher.Release(targetSnapshot["watchGeneration"])
@@ -273,7 +276,6 @@ class Win32InputAdapter {
             if !cleanupSucceeded
                 throw Error("Snippet insertion destroy watcher cleanup failed")
         }
-        this.capturedTarget := ""
         return true
     }
 
