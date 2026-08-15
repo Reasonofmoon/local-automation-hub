@@ -17,19 +17,25 @@ The existing capability record is [kakao-ui-capability.md](../2026-08-12-local-a
 
 ## Implementation and focused evidence
 
-The implementation range is represented by the reviewed commits `bb617cd`,
-`3ce814b`, `3931e97`, `2f45d8e`, `6f11fc4`, and `df5830e`. The uncommitted
-`.superpowers/sdd/multiline-task-*-report.md` files retain the task-level RED,
-GREEN, review, and remediation evidence.
+The product implementation is at `86b59f7` (`test: cover snippet watcher
+service cleanup`). The reviewed range after plan commit `057029c` contains
+these 13 commits, in chronological order:
 
-Focused headless evidence recorded by the task reports:
+`bb617cd`, `3ce814b`, `3931e97`, `2f45d8e`, `6f11fc4`, `df5830e`, `f858767`,
+`5f42050`, `c228c1c`, `c056c0d`, `08dfb71`, `497c73d`, `86b59f7`.
 
-- `tests\Run-Tests.ps1 -Only core` — PASS: 1 test file; palette capture and
-  hide-before-invoke ordering.
-- `tests\Run-Tests.ps1 -Only snippets` — PASS: 1 test file; custom controls,
-  identity guards, password/elevation guards, and `paste,wait,restore` order.
-- `tests\Run-Tests.ps1 -Only main-startup,core,snippets` — PASS: 3 test files;
-  one shared adapter and `snippet.multiline-prompt` registration.
+The last five commits (`c228c1c`, `c056c0d`, `08dfb71`, `497c73d`, and
+`86b59f7`) are the review-driven cleanup, live-metadata/identity hardening,
+watcher-lifetime correction, and regression-test additions made after the
+earlier documentation checkpoint. The uncommitted `.superpowers/sdd/
+multiline-task-*-report.md` files retain task-level RED, GREEN, review, and
+remediation evidence.
+
+Fresh focused headless evidence from `86b59f7`:
+
+- `tests\Run-Tests.ps1 -Only snippets,core,main-startup` — PASS: 3 test files;
+  palette capture/hide ordering, custom/standard target guards, clipboard
+  handoff ordering, one shared adapter, and command registration.
 
 The task reports also retain the expected RED runs before each production
 change. The direct standalone palette `/Validate` command can remain resident
@@ -44,10 +50,11 @@ All commands ran from the repository root. Timestamps are local ISO-8601 with
 
 | Timestamp | Command | Result |
 | --- | --- | --- |
-| 2026-08-15T09:16:52.2222344+09:00 → 2026-08-15T09:17:02.0547794+09:00 | `powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1` | Exit `0`; seven AHK module validations and eight AHK test-file validations completed; all eight test files printed `PASS`; aggregate `PASS: 8 test file(s)`. |
-| 2026-08-15T09:17:07.9993944+09:00 → 2026-08-15T09:17:08.0934712+09:00 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Validate-PowerShell.ps1` | Exit `0`; `PASS: 8 PowerShell file(s) parsed`. |
-| 2026-08-15T09:17:14.3569773+09:00 → 2026-08-15T09:17:14.3806713+09:00 | `& 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe' /ErrorStdOut=UTF-8 /Validate main.ahk` | Exit `0`; no diagnostic output. |
-| 2026-08-15T09:18:13.9115097+09:00 → 2026-08-15T09:18:13.9639932+09:00 | `git diff --check` | Exit `0`; no whitespace diagnostics (only normal Git LF-to-CRLF notices). |
+| 2026-08-15T10:50:10.2737689+09:00 → 2026-08-15T10:50:10.9653851+09:00 | `powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only snippets,core,main-startup` | Exit `0`; 3 selected AHK test files validated and printed `PASS`; aggregate `PASS: 3 test file(s)`. |
+| 2026-08-15T10:51:36.5146880+09:00 → 2026-08-15T10:51:46.5185594+09:00 | `powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1` | Exit `0`; seven AHK module validations and eight AHK test-file validations completed; all eight test files printed `PASS`; aggregate `PASS: 8 test file(s)`. |
+| 2026-08-15T10:50:32.6389325+09:00 → 2026-08-15T10:50:32.9638386+09:00 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Validate-PowerShell.ps1` | Exit `0`; `PASS: 8 PowerShell file(s) parsed`. |
+| 2026-08-15T10:51:01.7017967+09:00 → 2026-08-15T10:51:01.7692418+09:00 | `Start-Process AutoHotkey64.exe /ErrorStdOut=UTF-8 /Validate main.ahk -Wait -PassThru` | Exit `0`; no diagnostic output. |
+| 2026-08-15T10:51:07.8434233+09:00 → 2026-08-15T10:51:07.8897613+09:00 | `git diff --check` (before documentation edits) | Exit `0`; no whitespace diagnostics. |
 
 The full runner uses the repository's process-owned AutoHotkey runner and does
 not open a palette or send input to a user window. The repository has no
@@ -61,8 +68,8 @@ as runtime secret storage.
 
 | Timestamp | Command | Result |
 | --- | --- | --- |
-| 2026-08-15T09:17:20.9280231+09:00 → 2026-08-15T09:17:20.9736245+09:00 | `rg -n -i '(password|secret|credential)[[:space:]]*=[[:space:]]*[^;\r\n]+' src main.ahk config/settings.example.ini` | `rg` exit `1` (no matches); no operational secret assignment. |
-| 2026-08-15T09:17:27.7737370+09:00 → 2026-08-15T09:17:27.8110336+09:00 | `rg -n -i 'ControlGetText|WinGetText|A_Clipboard.*(password|secret|credential)|SendText\(.*(password|secret|credential)' src main.ahk config/settings.example.ini` | `rg` exit `1` (no matches); no forbidden credential-content read/send pattern. |
+| 2026-08-15T10:51:18.2524623+09:00 → 2026-08-15T10:51:18.3210465+09:00 | `rg -n -i '(password|secret|credential)[[:space:]]*=[[:space:]]*[^;\r\n]+' src main.ahk config/settings.example.ini` | `rg` exit `1` (no matches); no operational secret assignment. |
+| 2026-08-15T10:51:18.2524623+09:00 → 2026-08-15T10:51:18.3210465+09:00 | `rg -n -i 'ControlGetText|WinGetText|A_Clipboard.*(password|secret|credential)|SendText\(.*(password|secret|credential)' src main.ahk config/settings.example.ini` | `rg` exit `1` (no matches); no forbidden credential-content read/send pattern. |
 
 The implementation does use the clipboard for a configured multiline body, but
 does not store or log credentials, terminal content, or target field text.
@@ -76,8 +83,8 @@ process was terminated and no pre-existing user process was touched.
 
 | Phase | Timestamp | Method/result |
 | --- | --- | --- |
-| Before full gate | 2026-08-15T09:10:54.3895668+09:00 | CIM unavailable (`액세스가 거부되었습니다.`); fallback count `0`. |
-| After full gate | 2026-08-15T09:17:35.8249632+09:00 | CIM unavailable (`액세스가 거부되었습니다.`); fallback count `0`; no newly leaked test-owned process. |
+| Before full gate | 2026-08-15T10:51:30.6020414+09:00 → 2026-08-15T10:51:30.7027926+09:00 | CIM unavailable (`액세스가 거부되었습니다.`); `Get-Process AutoHotkey*` fallback count `0`. |
+| After full gate | 2026-08-15T10:51:54.8619791+09:00 → 2026-08-15T10:51:54.9564392+09:00 | CIM unavailable (`액세스가 거부되었습니다.`); fallback count `0`; no newly leaked test-owned process. |
 
 ## Manual UI QA
 
