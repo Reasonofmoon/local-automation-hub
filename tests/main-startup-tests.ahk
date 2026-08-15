@@ -17,8 +17,14 @@ if (startupError = "") {
     AssertTrue(startupHub.Has("inputAdapter"), "headless composition exposes the shared input adapter")
     AssertTrue(startupHub.Has("inputAdapter") && startupHub["palette"].targetHandoff = startupHub["inputAdapter"], "palette shares the snippet input adapter")
     AssertTrue(startupHub.Has("snippets") && startupHub["snippets"].inputAdapter = startupHub["inputAdapter"], "snippet service shares the shared input adapter")
-    AssertEqual(1, startupHub["registry"].Search("multiline-prompt").Length, "registers multiline prompt snippet")
     startupRegistry := startupHub["registry"]
+    startupSnippetService := startupHub["snippets"]
+    for snippetId, _ in startupSnippetService.snippets
+        AssertEqual(1, CountStartupCommandId(startupRegistry, "snippet." snippetId), "registers configured snippet command: " snippetId)
+    for approvedSkillId in ["skill-brainstorming", "skill-research"] {
+        if startupSnippetService.snippets.Has(approvedSkillId)
+            AssertEqual(1, CountStartupCommandId(startupRegistry, "snippet." approvedSkillId), "registers approved local skill snippet: " approvedSkillId)
+    }
     AssertTrue(startupRegistry.Search("workspace").Length > 0, "startup registers workspace commands")
     startupHasOrcaCommand := false
     for _, startupCommand in startupRegistry.All() {
@@ -48,4 +54,13 @@ CaptureDiagnosticsReport(calls, reports, presentedReport, *) {
     calls.Push(true)
     reports.Push(presentedReport)
     return true
+}
+
+CountStartupCommandId(registry, expectedId) {
+    count := 0
+    for _, command in registry.All() {
+        if (command["id"] = expectedId)
+            count += 1
+    }
+    return count
 }
