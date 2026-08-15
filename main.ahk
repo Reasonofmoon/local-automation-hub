@@ -76,7 +76,7 @@ InitializeHub(rootDir, registerHotkeys := true) {
 
     if registerHotkeys
         RegisterManifestHotkeys()
-    return Map("context", context, "registry", registry, "palette", palette, "inputAdapter", inputAdapter)
+    return Map("context", context, "registry", registry, "palette", palette, "inputAdapter", inputAdapter, "snippets", IsSet(snippets) ? snippets : "")
 }
 
 RegisterBuiltInCommands(registry, context) {

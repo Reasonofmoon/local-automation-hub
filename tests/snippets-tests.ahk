@@ -21,6 +21,8 @@ class FakeInputAdapter {
         this.processReplaced := false
         this.failCapture := false
         this.failPaste := false
+        this.failWait := false
+        this.failRestore := false
         this.hasFocusDrift := false
     }
 
@@ -82,6 +84,8 @@ class FakeInputAdapter {
 
     WaitForPasteHandoff() {
         this._events.Push("wait")
+        if this.failWait
+            throw Error("Wait failed")
     }
 
     CaptureClipboard() {
@@ -104,6 +108,8 @@ class FakeInputAdapter {
     RestoreClipboard(value) {
         this._events.Push("restore")
         this._clipboardText := value
+        if this.failRestore
+            throw Error("Restore failed")
     }
 
     SendText(targetSnapshot, text) {
@@ -260,6 +266,45 @@ AssertThrows(() => failingPasteService.Insert("multi"), "surfaces paste failure"
 AssertEqual("before", failingPasteAdapter.ClipboardText(), "restores clipboard after paste failure")
 AssertEqual("wait,restore", failingPasteAdapter.EventSummary(), "waits for paste handoff before restoring after paste failure")
 
+primaryCleanupAdapter := FakeInputAdapter("before")
+primaryCleanupAdapter.failPaste := true
+primaryCleanupAdapter.failWait := true
+primaryCleanupAdapter.failRestore := true
+primaryCleanupAdapter.CaptureBeforePalette()
+primaryCleanupService := SnippetService(Map("multi", "line 1`nline 2"), primaryCleanupAdapter)
+AssertThrowsWithMessage(
+    () => primaryCleanupService.Insert("multi"),
+    "Paste failed",
+    "preserves the primary paste failure when both cleanup steps fail"
+)
+AssertEqual("wait,restore", primaryCleanupAdapter.EventSummary(), "attempts wait then restore after a paste failure")
+AssertEqual("before", primaryCleanupAdapter.ClipboardText(), "does not leak snippet content when cleanup reports failure")
+
+waitCleanupAdapter := FakeInputAdapter("before")
+waitCleanupAdapter.failWait := true
+waitCleanupAdapter.failRestore := true
+waitCleanupAdapter.CaptureBeforePalette()
+waitCleanupService := SnippetService(Map("multi", "line 1`nline 2"), waitCleanupAdapter)
+AssertThrowsWithMessage(
+    () => waitCleanupService.Insert("multi"),
+    "Wait failed",
+    "uses wait failure as deterministic cleanup precedence"
+)
+AssertEqual("paste,wait,restore", waitCleanupAdapter.EventSummary(), "attempts restore even when wait fails")
+AssertEqual("before", waitCleanupAdapter.ClipboardText(), "restores clipboard when cleanup errors are surfaced")
+
+restoreCleanupAdapter := FakeInputAdapter("before")
+restoreCleanupAdapter.failRestore := true
+restoreCleanupAdapter.CaptureBeforePalette()
+restoreCleanupService := SnippetService(Map("multi", "line 1`nline 2"), restoreCleanupAdapter)
+AssertThrowsWithMessage(
+    () => restoreCleanupService.Insert("multi"),
+    "Restore failed",
+    "surfaces restore failure when wait succeeds"
+)
+AssertEqual("paste,wait,restore", restoreCleanupAdapter.EventSummary(), "waits before attempting clipboard restoration")
+AssertEqual("before", restoreCleanupAdapter.ClipboardText(), "does not leave snippet content after restore failure")
+
 repeatedAdapter := FakeInputAdapter("before")
 firstSnapshot := repeatedAdapter.CaptureBeforePalette()
 repeatedAdapter.isCustomControl := true
@@ -289,3 +334,21 @@ AssertEqual("snippet.feedback", fakeRegistry.CommandIds()[1], "registers one pal
 AssertEqual("snippet.meeting", fakeRegistry.CommandIds()[2], "uses each snippet config id in palette command")
 
 ExitWithTestResult()
+
+AssertThrowsWithMessage(callback, expectedMessage, message) {
+    global TestFailures
+    threw := false
+    caughtMessage := ""
+    try {
+        callback()
+    } catch as caughtError {
+        threw := true
+        caughtMessage := caughtError.Message
+    }
+    if !threw {
+        TestFailures += 1
+        FileAppend("FAIL: " message " (no exception)`n", "*")
+        return
+    }
+    AssertEqual(expectedMessage, caughtMessage, message)
+}

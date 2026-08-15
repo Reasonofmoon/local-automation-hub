@@ -37,16 +37,32 @@ class SnippetService {
         }
 
         savedClipboard := this.inputAdapter.CaptureClipboard()
+        primaryError := ""
+        cleanupError := ""
         try {
-            this.inputAdapter.SetClipboardText(body)
-            this.inputAdapter.Paste(targetSnapshot)
-        } finally {
-            try this.inputAdapter.WaitForPasteHandoff()
-            finally {
-                this.inputAdapter.RestoreClipboard(savedClipboard)
+            try {
+                this.inputAdapter.SetClipboardText(body)
+                this.inputAdapter.Paste(targetSnapshot)
+            } catch as caughtError {
+                primaryError := caughtError
+            } finally {
+                try this.inputAdapter.WaitForPasteHandoff()
+                catch as waitError {
+                    cleanupError := waitError
+                }
+                try this.inputAdapter.RestoreClipboard(savedClipboard)
+                catch as restoreError {
+                    ; Wait is the first cleanup step, so it wins if both cleanup steps fail.
+                    if !IsObject(cleanupError)
+                        cleanupError := restoreError
+                }
                 savedClipboard := ""
             }
         }
+        if IsObject(primaryError)
+            throw primaryError
+        if IsObject(cleanupError)
+            throw cleanupError
         return true
     }
 }
