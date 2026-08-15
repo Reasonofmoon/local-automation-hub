@@ -18,8 +18,9 @@ The existing capability record is [kakao-ui-capability.md](../2026-08-12-local-a
 ## Implementation and focused evidence
 
 The product implementation is at `556a319` (`fix: invalidate stale snippet
-capture before cleanup`). The reviewed range after plan commit `057029c`
-contains these 15 commits, in chronological order:
+capture before cleanup`). The reviewed product range `057029c..556a319`
+contains these 15 commits, in chronological order. Documentation-only commits
+after that endpoint do not change the verified runtime:
 
 `bb617cd`, `3ce814b`, `3931e97`, `2f45d8e`, `6f11fc4`, `df5830e`, `f858767`,
 `5f42050`, `c228c1c`, `c056c0d`, `08dfb71`, `497c73d`, `86b59f7`, `5bb3a3b`,

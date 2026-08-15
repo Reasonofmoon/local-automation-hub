@@ -91,11 +91,12 @@ mandatory:
   captured;
 - never fall back to the newly active window when restoration fails;
 - never insert into the hub palette itself;
-- allow a custom surface when the captured general window still exists and its
-  process identity matches.
+- allow a custom surface only when an exact focused HWND was captured and the
+  same window, process, focused HWND, and live class/style metadata still match.
 
 Custom browser/IDE/terminal controls often do not expose password semantics.
-Under the explicitly selected broad policy, those unknown controls are allowed.
+Under the explicitly selected broad policy, those unknown controls are allowed
+only when the exact focused HWND and live Win32 metadata can be revalidated.
 The documentation must state that the user is responsible for focusing a
 non-sensitive field before opening the palette.
 

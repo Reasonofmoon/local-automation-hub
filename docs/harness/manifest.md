@@ -62,7 +62,8 @@ orchestrator → builder → qa-reviewer → orchestrator
 팔레트와 스니펫 서비스는 하나의 target-handoff adapter를 공유한다. 어댑터는
 팔레트 표시 전에 창·프로세스·가능한 컨트롤 메타데이터만 캡처하고, 실행 전에
 그 동일한 창과 프로세스를 복원한다. 브라우저, IDE, Orca, Windows Terminal,
-AI CLI의 일반 커스텀 입력은 허용하지만, 표준 비밀번호 컨트롤과 커스텀
+AI CLI의 일반 커스텀 입력은 정확한 포커스 HWND와 live class/style을 다시
+검증할 수 있을 때 허용하지만, 표준 비밀번호 컨트롤과 커스텀
 컨트롤에서 식별된 password/credential 메타데이터는 차단한다. 권한이 낮은
 허브에서 권한 상승된 대상, 삭제된 창, 프로세스가 교체된 대상, 복원 중 포커스가
 바뀐 표준 컨트롤은 fail-closed로 중단하며 현재 활성 창으로 대체하지 않는다.

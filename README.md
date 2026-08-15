@@ -43,7 +43,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Register-Credentia
 붙여넣은 뒤 실행 전 클립보드를 성공·실패 모두 복원합니다.
 
 브라우저 textarea, IDE 편집기, Orca, Windows Terminal, AI CLI 등 일반적인
-커스텀 입력 컨트롤을 허용합니다. 커스텀 컨트롤은 비밀번호 의미를 안정적으로
+커스텀 입력 컨트롤은 정확한 포커스 HWND와 현재 class/style을 다시 확인할 수
+있을 때 허용합니다. 커스텀 컨트롤은 비밀번호 의미를 안정적으로
 노출하지 않을 수 있으므로 팔레트를 열기 전에 민감하지 않은 입력란인지 직접
 확인하세요. 알려진 표준 비밀번호 컨트롤, 권한이 낮은 허브에서 권한 상승된
 대상, 삭제되었거나 다른 프로세스로 교체된 캡처 대상은 차단합니다. 대상 복원에

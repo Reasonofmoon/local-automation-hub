@@ -27,8 +27,9 @@ The complete approved design is
 - Add an injected target-handoff capability shared by `CommandPalette` and
   `SnippetService`.
 - Store window/process/control metadata only; never store field text.
-- Treat an exact standard control as a strict identity boundary. For custom
-  controls, validate the captured window and process identity.
+- Treat both standard and custom controls as exact focused-HWND identity
+  boundaries. Revalidate the captured window, process, focused control HWND,
+  and live class/style metadata immediately before input.
 - Keep multiline insertion as a clipboard transaction with a bounded post-paste
   handoff delay and unconditional restoration in `finally`.
 - Preserve optional injected fakes for headless tests.
@@ -47,5 +48,6 @@ The complete approved design is
 
 ## Out of scope
 
-- Custom password-field detection, application allow lists, prompt editing,
+- Accessibility-only password semantics that expose no detectable Win32
+  password/credential metadata, application allow lists, prompt editing,
   variables, history, sync, and automatic prompt submission.
