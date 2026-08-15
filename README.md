@@ -33,6 +33,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Register-Credentia
 - `files.organize-selected`: Explorer에서 선택한 일반 파일을 미리 보고 확인한 뒤 `YYYY\MM\YYYY-MM-DD_name.ext`로 이동합니다.
 - `files.undo-last-organize`: 마지막으로 성공한 파일 이동 매핑만 한 번 되돌립니다. 원래 위치가 사용 중이면 중단합니다.
 
+### 고정 다중행 프롬프트
+
+`snippet.multiline-prompt`는 `config/settings.local.ini`의 `[Snippets]`에
+저장된 고정 본문을 사용합니다. 본문에서 줄바꿈은 실제 개행 대신 리터럴
+`\n` 두 글자를 사용합니다. 목적지 입력란을 먼저 포커스한 뒤
+`CapsLock + Space`로 팔레트를 열고 `snippet.multiline-prompt`를 검색·실행하세요.
+허브는 팔레트를 열기 전에 캡처한 창과 프로세스를 복원하고, 다중행 본문을
+붙여넣은 뒤 실행 전 클립보드를 성공·실패 모두 복원합니다.
+
+브라우저 textarea, IDE 편집기, Orca, Windows Terminal, AI CLI 등 일반적인
+커스텀 입력 컨트롤을 허용합니다. 커스텀 컨트롤은 비밀번호 의미를 안정적으로
+노출하지 않을 수 있으므로 팔레트를 열기 전에 민감하지 않은 입력란인지 직접
+확인하세요. 알려진 표준 비밀번호 컨트롤, 권한이 낮은 허브에서 권한 상승된
+대상, 삭제되었거나 다른 프로세스로 교체된 캡처 대상은 차단합니다. 대상 복원에
+실패하면 현재 활성 창으로 대체하지 않고 입력을 중단합니다.
+
 ## Orca AI development workspace
 
 `workspace.ai-development`는 기존 Git checkout 하나를 Orca workspace로 열고

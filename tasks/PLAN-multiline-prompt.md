@@ -28,9 +28,10 @@
 - Modify `tests/core-tests.ahk`: verify capture and hide-before-invoke ordering without real input.
 - Modify `tests/snippets-tests.ahk`: verify custom surfaces, stale/replaced targets, exact standard controls, paste ordering, and clipboard restoration.
 - Modify `tests/main-startup-tests.ahk`: verify headless composition still registers snippet commands with the new shared dependency.
+- Modify `config/settings.example.ini`: document the fixed multiline value and literal `\n` convention.
 - Modify `README.md`: document the command, supported target classes, and the broad custom-field risk.
-- Modify `tasks/lessons.md`: record the pre-palette target-handoff rule after the user correction.
-- Modify `docs/harness/runs/2026-08-12-local-automation-hub/verification.md`: record automated evidence and the bounded manual QA result.
+- Modify `docs/harness/manifest.md`: record the target-handoff contract and fail-closed boundaries.
+- Add `docs/harness/runs/2026-08-15-multiline-prompt/verification.md`: record automated evidence and the bounded manual QA result.
 
 ---
 
@@ -633,46 +634,31 @@ git commit -m "fix: wire snippet target handoff"
 
 ---
 
-### Task 4: Documentation, lessons, automated gate, and manual QA
+### Task 4: Documentation, automated gate, and manual QA boundary
 
 **Files:**
+- Modify: `config/settings.example.ini`
 - Modify: `README.md`
-- Modify: `tasks/lessons.md`
-- Modify: `docs/harness/runs/2026-08-12-local-automation-hub/verification.md`
+- Modify: `docs/harness/manifest.md`
+- Add: `docs/harness/runs/2026-08-15-multiline-prompt/verification.md`
+- Modify: `tasks/PLAN-multiline-prompt.md`
 
 **Interfaces:**
 - Consumes: completed palette/snippet/main behavior from Tasks 1-3.
 - Produces: user-facing usage/risk documentation and final verification evidence.
 
-- [ ] **Step 1: Document first use and the custom-field boundary**
+- [x] **Step 1: Document first use and the fixed configuration boundary**
 
-Add to the README Snippet section:
+The example config and README describe `snippet.multiline-prompt`, the
+`CapsLock + Space` palette flow, the literal `\n` line-break convention, and
+clipboard restoration.
 
-```markdown
-`snippet.multiline-prompt` reads its fixed body from
-`config/settings.local.ini`. Focus the destination first, open the palette with
-`CapsLock + Space`, and run the snippet. The hub returns to that captured window
-and pastes the multiline body while restoring the prior clipboard.
+- [x] **Step 2: Record the target-handoff correction pattern**
 
-Browser, IDE, Orca, Windows Terminal, and AI CLI custom inputs are allowed.
-Because custom controls do not reliably expose password semantics, verify that
-the focused field is non-sensitive before opening the palette. Known standard
-password controls and unsafe elevated windows remain blocked.
-```
+The harness manifest records capture-before-palette, hide-before-invoke,
+identity restoration, broad custom-control policy, and fail-closed behavior.
 
-- [ ] **Step 2: Record the correction pattern in lessons**
-
-Append:
-
-```markdown
-## 2026-08-15 - Capture an input target before transient UI takes focus
-
-- A command palette changes the active window, so an input command must not discover its target at invocation time.
-- Capture only target identity before showing transient UI, hide that UI before invocation, and fail closed if the captured window/process cannot be restored.
-- Custom controls require an explicit product policy because their password semantics are often unavailable.
-```
-
-- [ ] **Step 3: Run the complete automated gate with fresh evidence**
+- [x] **Step 3: Run the complete automated gate with fresh evidence**
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1
@@ -683,13 +669,13 @@ git diff --check
 
 Expected: all AHK test files PASS, all PowerShell files parse, main validation exit 0, and diff check has no errors. Record exact counts and timestamps in the verification document.
 
-- [ ] **Step 4: Audit test-owned AutoHotkey processes**
+- [x] **Step 4: Audit test-owned AutoHotkey processes**
 
 Before and after the full gate, list only AutoHotkey processes whose command line contains this repository path when available. When WMI/CIM access is denied, use `Get-Process AutoHotkey*` as a documented fallback and never terminate an unidentified process.
 
 Expected: no newly leaked test-owned process. Do not terminate pre-existing user AutoHotkey processes.
 
-- [ ] **Step 5: Perform bounded manual QA with disposable text**
+- [x] **Step 5: Record bounded manual QA status**
 
 With the user present, place a harmless two-line prompt such as `alpha\nbeta` in the local config, restart the hub, and verify one insertion in each available surface:
 
@@ -702,9 +688,12 @@ With the user present, place a harmless two-line prompt such as `alpha\nbeta` in
 
 After every multiline insertion, verify the clipboard still contains its pre-test sentinel. Do not paste credentials, do not press Enter in terminal/AI inputs, and do not use production forms.
 
-If any required app is unavailable, record it as `not performed` rather than claiming success.
+This delegated headless run did not use real UI or the user clipboard, so the
+insertion checks were not performed. Every surface is recorded as `not
+performed` rather than claimed as passing; the user can run this bounded QA
+later with disposable text and a clipboard sentinel.
 
-- [ ] **Step 6: Update verification evidence**
+- [x] **Step 6: Update verification evidence**
 
 Record:
 
@@ -720,14 +709,14 @@ Record:
 | Standard password control | PASS/FAIL/not performed | insertion blocked |
 ```
 
-- [ ] **Step 7: Commit documentation and verification**
+- [x] **Step 7: Commit documentation and verification**
 
 ```powershell
-git add README.md tasks/lessons.md docs/harness/runs/2026-08-12-local-automation-hub/verification.md
+git add config/settings.example.ini README.md docs/harness/manifest.md docs/harness/runs/2026-08-15-multiline-prompt/verification.md tasks/PLAN-multiline-prompt.md
 git commit -m "docs: explain multiline snippet targets"
 ```
 
-- [ ] **Step 8: Final range and worktree audit**
+- [x] **Step 8: Final range and worktree audit**
 
 ```powershell
 git log --oneline -6

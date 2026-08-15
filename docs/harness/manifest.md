@@ -52,6 +52,26 @@ orchestrator → builder → qa-reviewer → orchestrator
 
 구현 계획에서 실제 설치 경로와 지원 옵션을 확인한 명령만 사용한다. 최소 검증은 AutoHotkey v2 구문 검사, PowerShell 파서 검사, 설정 충돌 검사, 임시 파일 시나리오다. TypeScript 소스가 추가되는 경우에만 `npx tsc --noEmit`을 실행한다.
 
+## Multiline prompt snippet contract
+
+`snippet.multiline-prompt`는 `[Snippets]`에 저장된 고정 본문을 실행하는
+저위험 팔레트 명령이다. 설정 예제와 로컬 설정에서는 리터럴 `\n`을 한 줄
+개행 표기로 사용한다. 사용자는 목적지를 먼저 포커스하고 `CapsLock + Space`로
+팔레트를 연 다음 명령 ID를 검색·실행한다.
+
+팔레트와 스니펫 서비스는 하나의 target-handoff adapter를 공유한다. 어댑터는
+팔레트 표시 전에 창·프로세스·가능한 컨트롤 메타데이터만 캡처하고, 실행 전에
+그 동일한 창과 프로세스를 복원한다. 브라우저, IDE, Orca, Windows Terminal,
+AI CLI의 일반 커스텀 입력은 허용하지만, 표준 비밀번호 컨트롤과 커스텀
+컨트롤에서 식별된 password/credential 메타데이터는 차단한다. 권한이 낮은
+허브에서 권한 상승된 대상, 삭제된 창, 프로세스가 교체된 대상, 복원 중 포커스가
+바뀐 표준 컨트롤은 fail-closed로 중단하며 현재 활성 창으로 대체하지 않는다.
+
+다중행 입력은 설정 본문을 클립보드로 옮겨 붙여넣고 bounded handoff를 기다린
+뒤 원래 클립보드를 복원한다. 창 텍스트·터미널 내용·자격 증명은 캡처하거나
+로그·설정·커밋에 저장하지 않는다. 자동 검증은 fake adapter와 headless
+composition만 사용하며, 실제 UI/클립보드 수동 QA는 별도 사용자 확인 범위다.
+
 ## Orca AI development workspace 기록
 
 `workspace.ai-development`는 중간 위험도(`medium`)의 독립 팔레트 명령이다.
