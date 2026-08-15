@@ -1,7 +1,7 @@
 # Multiline Snippet Target Handoff Design
 
 **Date:** 2026-08-15  
-**Status:** approved design, awaiting written-spec review
+**Status:** implemented and verified
 
 ## 1. Goal
 
@@ -108,6 +108,12 @@ boundary. Error text is redacted by the existing safe error path.
 No retry targets a different window. A failed activation or identity check
 aborts without sending keystrokes. The clipboard backup is released after
 restoration so it is not retained in service state.
+
+Before a captured target is replaced, the adapter clears the captured snapshot
+before attempting watcher cleanup. If an unhook fails, the old watcher and its
+callback remain independently retryable, but the old snapshot cannot be
+consumed by a later insertion. The palette may still open after reporting the
+capture warning; insertion then fails closed until a fresh target is captured.
 
 ## 7. Testing strategy
 

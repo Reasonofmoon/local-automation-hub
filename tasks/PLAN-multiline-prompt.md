@@ -729,14 +729,14 @@ git diff --check 5deb5cd..HEAD
 git status --short --branch
 ```
 
-Expected: the final branch range contains fifteen commits after the spec
-commit `5deb5cd`: the planning commit `057029c`, thirteen implementation,
-documentation, and review-driven hardening commits through product HEAD
-`86b59f7`, and this final verification-doc commit. The thirteen commits after
-`057029c` are retained as separate logical changes because the later review
-passes corrected cleanup errors, live target metadata/identity, watcher
-lifetime, and regression coverage. The committed-range diff is clean, and
-only the intentional untracked `.superpowers/` reports remain.
+Expected: the final branch range contains sixteen commits after the spec
+commit `5deb5cd`: the planning commit `057029c`, fourteen implementation,
+test, and review-driven hardening commits through product HEAD `556a319`, and
+the verification-doc commit `5bb3a3b`. The fifteen commits after `057029c` are
+retained as separate logical changes because the later review passes corrected
+cleanup errors, live target metadata/identity, watcher lifetime, regression
+coverage, and stale capture invalidation. The committed-range diff is clean,
+and only the intentional untracked `.superpowers/` reports remain.
 
 ## Completion gate
 

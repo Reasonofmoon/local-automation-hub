@@ -17,25 +17,27 @@ The existing capability record is [kakao-ui-capability.md](../2026-08-12-local-a
 
 ## Implementation and focused evidence
 
-The product implementation is at `86b59f7` (`test: cover snippet watcher
-service cleanup`). The reviewed range after plan commit `057029c` contains
-these 13 commits, in chronological order:
+The product implementation is at `556a319` (`fix: invalidate stale snippet
+capture before cleanup`). The reviewed range after plan commit `057029c`
+contains these 15 commits, in chronological order:
 
 `bb617cd`, `3ce814b`, `3931e97`, `2f45d8e`, `6f11fc4`, `df5830e`, `f858767`,
-`5f42050`, `c228c1c`, `c056c0d`, `08dfb71`, `497c73d`, `86b59f7`.
+`5f42050`, `c228c1c`, `c056c0d`, `08dfb71`, `497c73d`, `86b59f7`, `5bb3a3b`,
+`556a319`.
 
-The last five commits (`c228c1c`, `c056c0d`, `08dfb71`, `497c73d`, and
-`86b59f7`) are the review-driven cleanup, live-metadata/identity hardening,
-watcher-lifetime correction, and regression-test additions made after the
-earlier documentation checkpoint. The uncommitted `.superpowers/sdd/
-multiline-task-*-report.md` files retain task-level RED, GREEN, review, and
-remediation evidence.
+The last six commits (`c228c1c`, `c056c0d`, `08dfb71`, `497c73d`, `86b59f7`,
+and `556a319`) are the review-driven cleanup, live-metadata/identity
+hardening, watcher-lifetime correction, regression-test additions, and final
+stale-capture fix. The uncommitted `.superpowers/sdd/multiline-task-*-report.md`
+files retain task-level RED, GREEN, review, and remediation evidence.
 
-Fresh focused headless evidence from `86b59f7`:
+Fresh focused headless evidence from `556a319` (11:05:55.2970990 →
+11:06:08.9576355 +09:00):
 
 - `tests\Run-Tests.ps1 -Only snippets,core,main-startup` — PASS: 3 test files;
   palette capture/hide ordering, custom/standard target guards, clipboard
-  handoff ordering, one shared adapter, and command registration.
+  handoff ordering, one shared adapter, command registration, and failed
+  replacement-capture stale-snapshot rejection.
 
 The task reports also retain the expected RED runs before each production
 change. The direct standalone palette `/Validate` command can remain resident
@@ -50,11 +52,11 @@ All commands ran from the repository root. Timestamps are local ISO-8601 with
 
 | Timestamp | Command | Result |
 | --- | --- | --- |
-| 2026-08-15T10:50:10.2737689+09:00 → 2026-08-15T10:50:10.9653851+09:00 | `powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only snippets,core,main-startup` | Exit `0`; 3 selected AHK test files validated and printed `PASS`; aggregate `PASS: 3 test file(s)`. |
-| 2026-08-15T10:51:36.5146880+09:00 → 2026-08-15T10:51:46.5185594+09:00 | `powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1` | Exit `0`; seven AHK module validations and eight AHK test-file validations completed; all eight test files printed `PASS`; aggregate `PASS: 8 test file(s)`. |
-| 2026-08-15T10:50:32.6389325+09:00 → 2026-08-15T10:50:32.9638386+09:00 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Validate-PowerShell.ps1` | Exit `0`; `PASS: 8 PowerShell file(s) parsed`. |
-| 2026-08-15T10:51:01.7017967+09:00 → 2026-08-15T10:51:01.7692418+09:00 | `Start-Process AutoHotkey64.exe /ErrorStdOut=UTF-8 /Validate main.ahk -Wait -PassThru` | Exit `0`; no diagnostic output. |
-| 2026-08-15T10:51:07.8434233+09:00 → 2026-08-15T10:51:07.8897613+09:00 | `git diff --check` (before documentation edits) | Exit `0`; no whitespace diagnostics. |
+| 2026-08-15T11:05:55.2970990+09:00 → 2026-08-15T11:06:08.9576355+09:00 | `powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only snippets,core,main-startup` | Exit `0`; 3 selected AHK test files validated and printed `PASS`; aggregate `PASS: 3 test file(s)`. |
+| 2026-08-15T11:07:29.2536934+09:00 → 2026-08-15T11:07:48.3466843+09:00 | `powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1` | Exit `0`; seven AHK module validations and eight AHK test-file validations completed; all eight test files printed `PASS`; aggregate `PASS: 8 test file(s)`. |
+| 2026-08-15T11:07:53.5280238+09:00 → 2026-08-15T11:08:04.3892001+09:00 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Validate-PowerShell.ps1` | Exit `0`; `PASS: 8 PowerShell file(s) parsed`. |
+| 2026-08-15T11:08:08.7422087+09:00 → 2026-08-15T11:08:20.1094963+09:00 | `Start-Process AutoHotkey64.exe /ErrorStdOut=UTF-8 /Validate main.ahk -Wait -PassThru` | Exit `0`; no diagnostic output. |
+| 2026-08-15T11:08:24.6644801+09:00 → 2026-08-15T11:08:34.5705858+09:00 | `git diff --check` | Exit `0`; no whitespace diagnostics. |
 
 The full runner uses the repository's process-owned AutoHotkey runner and does
 not open a palette or send input to a user window. The repository has no
@@ -83,8 +85,7 @@ process was terminated and no pre-existing user process was touched.
 
 | Phase | Timestamp | Method/result |
 | --- | --- | --- |
-| Before full gate | 2026-08-15T10:51:30.6020414+09:00 → 2026-08-15T10:51:30.7027926+09:00 | CIM unavailable (`액세스가 거부되었습니다.`); `Get-Process AutoHotkey*` fallback count `0`. |
-| After full gate | 2026-08-15T10:51:54.8619791+09:00 → 2026-08-15T10:51:54.9564392+09:00 | CIM unavailable (`액세스가 거부되었습니다.`); fallback count `0`; no newly leaked test-owned process. |
+| Fresh process audit | 2026-08-15T11:09:37.9879534+09:00 → 2026-08-15T11:09:47.7651537+09:00 | `Get-Process AutoHotkey*` fallback count `0`; no test-owned process remained. |
 
 ## Manual UI QA
 
