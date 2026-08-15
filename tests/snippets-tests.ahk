@@ -12,8 +12,9 @@ class FakeInputAdapter {
         this._captured := false
         this._snapshot := ""
         this._events := []
-        this.isPasswordControl := false
         this.isCustomControl := false
+        this.captureControlClass := ""
+        this.captureControlStyle := 0
         this.isTargetElevated := false
         this.isHubElevated := false
         this.targetDestroyed := false
@@ -30,12 +31,15 @@ class FakeInputAdapter {
         if this.failCapture
             throw Error("Target capture failed")
         this._captured := true
+        controlClass := this.captureControlClass
+        if (controlClass = "")
+            controlClass := this.isCustomControl ? "Chrome_RenderWidgetHostHWND1" : "Edit1"
         this._snapshot := Map(
             "windowHandle", 100,
             "processId", 200,
             "controlHandle", this.isCustomControl ? 0 : 300,
-            "controlClass", this.isCustomControl ? "Chrome_RenderWidgetHostHWND1" : "Edit1",
-            "controlStyle", this.isPasswordControl ? 0x20 : 0,
+            "controlClass", controlClass,
+            "controlStyle", this.captureControlStyle,
             "isStandardControl", !this.isCustomControl
         )
         return this._snapshot
@@ -51,7 +55,7 @@ class FakeInputAdapter {
             throw Error("Snippet insertion target no longer exists")
         if this.processReplaced
             throw Error("Snippet insertion target process changed")
-        if this.isPasswordControl
+        if IsPasswordControl(targetSnapshot["controlClass"], targetSnapshot["controlStyle"])
             throw Error("Snippet insertion is blocked for password controls")
         if this.isTargetElevated && !this.isHubElevated
             throw Error("Snippet insertion is blocked for elevated targets")
@@ -67,7 +71,7 @@ class FakeInputAdapter {
             throw Error("Snippet insertion target no longer exists")
         if this.processReplaced
             throw Error("Snippet insertion target process changed")
-        if this.isPasswordControl
+        if IsPasswordControl(targetSnapshot["controlClass"], targetSnapshot["controlStyle"])
             throw Error("Snippet insertion is blocked for password controls")
         if this.isTargetElevated && !this.isHubElevated
             throw Error("Snippet insertion is blocked for elevated targets")
@@ -185,7 +189,7 @@ AssertEqual("", pasteDriftAdapter.InsertedText(), "does not paste after focus dr
 AssertEqual(0, pasteDriftAdapter.PasteCount(), "does not invoke paste after focus drift")
 AssertEqual("before", pasteDriftAdapter.ClipboardText(), "restores clipboard after focus drift before paste")
 
-adapter.isPasswordControl := true
+adapter.captureControlStyle := 0x20
 adapter.CaptureBeforePalette()
 AssertThrows(() => service.Insert("multi"), "blocks password controls")
 AssertEqual("before", adapter.ClipboardText(), "does not alter clipboard for password controls")
@@ -196,6 +200,35 @@ customAdapter.CaptureBeforePalette()
 customService := SnippetService(Map("multi", "line 1\nline 2"), customAdapter)
 customService.Insert("multi")
 AssertEqual("line 1`nline 2", customAdapter.InsertedText(), "pastes multiline text into custom controls")
+
+metadataAdapter := Win32InputAdapter()
+safeCustomSnapshot := Map(
+    "windowHandle", 100,
+    "processId", 200,
+    "controlHandle", 0,
+    "controlClass", "Chrome_RenderWidgetHostHWND1",
+    "controlStyle", 0,
+    "isStandardControl", false
+)
+metadataAdapter.ValidateTargetSnapshot(safeCustomSnapshot, true)
+credentialCustomSnapshot := Map(
+    "windowHandle", 100,
+    "processId", 200,
+    "controlHandle", 0,
+    "controlClass", "CredentialInput",
+    "controlStyle", 0,
+    "isStandardControl", false
+)
+AssertThrows(() => metadataAdapter.ValidateTargetSnapshot(credentialCustomSnapshot, true), "blocks credential-like custom controls from snapshot metadata")
+passwordStyleCustomSnapshot := Map(
+    "windowHandle", 100,
+    "processId", 200,
+    "controlHandle", 0,
+    "controlClass", "Chrome_RenderWidgetHostHWND1",
+    "controlStyle", 0x20,
+    "isStandardControl", false
+)
+AssertThrows(() => metadataAdapter.ValidateTargetSnapshot(passwordStyleCustomSnapshot, true), "blocks password-style custom controls from snapshot metadata")
 
 destroyedAdapter := FakeInputAdapter("before")
 destroyedAdapter.CaptureBeforePalette()

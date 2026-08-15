@@ -102,8 +102,7 @@ class Win32InputAdapter {
         if IsProcessElevated(targetProcessId) && !IsProcessElevated(DllCall("GetCurrentProcessId", "UInt"))
             throw Error("Snippet insertion is blocked for elevated targets")
 
-        if targetSnapshot["isStandardControl"]
-            this.ValidateTargetSnapshot(targetSnapshot)
+        this.ValidateTargetSnapshot(targetSnapshot, true)
 
         WinActivate("ahk_id " windowHandle)
         if !WinWaitActive("ahk_id " windowHandle, , 1)
@@ -138,8 +137,8 @@ class Win32InputAdapter {
         if IsProcessElevated(targetProcessId) && !IsProcessElevated(DllCall("GetCurrentProcessId", "UInt"))
             throw Error("Snippet insertion is blocked for elevated targets")
 
+        this.ValidateTargetSnapshot(targetSnapshot, true)
         if targetSnapshot["isStandardControl"] {
-            this.ValidateTargetSnapshot(targetSnapshot)
             currentControl := ControlGetFocus("ahk_id " windowHandle)
             currentControlHandle := currentControl = "" ? 0 : ControlGetHwnd(currentControl, "ahk_id " windowHandle)
             if currentControlHandle != targetSnapshot["controlHandle"]
@@ -148,19 +147,22 @@ class Win32InputAdapter {
         return true
     }
 
-    ValidateTargetSnapshot(targetSnapshot) {
+    ValidateTargetSnapshot(targetSnapshot, allowCustomControl := false) {
         if !IsObject(targetSnapshot)
             throw Error("Snippet insertion target snapshot is invalid")
         if !targetSnapshot.Has("controlHandle") || !targetSnapshot.Has("controlClass") || !targetSnapshot.Has("controlStyle")
             throw Error("Snippet insertion target snapshot is invalid")
-        if !targetSnapshot["controlHandle"]
-            throw Error("Snippet insertion is blocked because the focused control handle is unavailable")
         controlClass := targetSnapshot["controlClass"]
         controlStyle := targetSnapshot["controlStyle"]
-        if !IsStandardTextControl(controlClass)
-            throw Error("Snippet insertion is blocked because the focused control is not a standard Edit or RichEdit control")
         if IsPasswordControl(controlClass, controlStyle)
             throw Error("Snippet insertion is blocked for password controls")
+        if allowCustomControl && !IsStandardTextControl(controlClass)
+            return true
+        if !targetSnapshot["controlHandle"]
+            throw Error("Snippet insertion is blocked because the focused control handle is unavailable")
+        if !IsStandardTextControl(controlClass)
+            throw Error("Snippet insertion is blocked because the focused control is not a standard Edit or RichEdit control")
+        return true
     }
 
     CaptureClipboard() {
