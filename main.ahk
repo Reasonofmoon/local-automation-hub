@@ -58,9 +58,10 @@ InitializeHub(rootDir, registerHotkeys := true) {
         context.Notify("Configuration validation failed: " validationErrors.Length " issue(s)", "error")
     registry := CommandRegistry()
     RegisterSystemDiagnostics(registry, context)
+    inputAdapter := Win32InputAdapter()
     if (configLoadError = "") {
         RegisterBuiltInCommands(registry, context)
-        snippets := SnippetService(config["Snippets"], Win32InputAdapter(), context)
+        snippets := SnippetService(config["Snippets"], inputAdapter, context)
         RegisterSnippetCommands(registry, snippets)
     }
     aiWorkspaceLauncher := OrcaWorkspaceService(
@@ -71,11 +72,11 @@ InitializeHub(rootDir, registerHotkeys := true) {
         context
     )
     RegisterOrcaWorkspaceCommand(registry, aiWorkspaceLauncher)
-    palette := CommandPalette(registry, context)
+    palette := CommandPalette(registry, context, inputAdapter)
 
     if registerHotkeys
         RegisterManifestHotkeys()
-    return Map("context", context, "registry", registry, "palette", palette)
+    return Map("context", context, "registry", registry, "palette", palette, "inputAdapter", inputAdapter)
 }
 
 RegisterBuiltInCommands(registry, context) {

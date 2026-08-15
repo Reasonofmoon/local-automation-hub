@@ -14,6 +14,9 @@ try {
 
 AssertEqual("", startupError, "headless startup composition registers built-in commands")
 if (startupError = "") {
+    AssertTrue(startupHub.Has("inputAdapter"), "headless composition exposes the shared input adapter")
+    AssertTrue(startupHub.Has("inputAdapter") && startupHub["palette"].targetHandoff = startupHub["inputAdapter"], "palette shares the snippet input adapter")
+    AssertEqual(1, startupHub["registry"].Search("multiline-prompt").Length, "registers multiline prompt snippet")
     startupRegistry := startupHub["registry"]
     AssertTrue(startupRegistry.Search("workspace").Length > 0, "startup registers workspace commands")
     startupHasOrcaCommand := false
