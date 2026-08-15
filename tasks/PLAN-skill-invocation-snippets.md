@@ -31,7 +31,7 @@
 - Consumes: existing INI `[Snippets]` key/value loader and `RegisterSnippetCommands(registry, service)`.
 - Produces: eighteen palette command IDs in the form `snippet.skill-<name>` whose bodies are slash commands.
 
-- [ ] **Step 1: Capture the non-Snippets sections and write a failing local contract check**
+- [x] **Step 1: Capture the non-Snippets sections and write a failing local contract check**
 
 Run this read-only PowerShell check before editing:
 
@@ -64,7 +64,7 @@ if (@(Compare-Object $expected $actual).Count -ne 0) { throw 'RED: local skill s
 
 Expected: FAIL with `RED: local skill snippets do not match the approved set` because the old two entries still exist.
 
-- [ ] **Step 2: Replace only the `[Snippets]` section**
+- [x] **Step 2: Replace only the `[Snippets]` section**
 
 Set the section to exactly:
 
@@ -92,7 +92,7 @@ skill-using-superpowers=/using-superpowers
 
 Use `apply_patch` so the remaining local configuration is preserved verbatim.
 
-- [ ] **Step 3: Run the local contract check again**
+- [x] **Step 3: Run the local contract check again**
 
 Run the exact PowerShell check from Step 1.
 
@@ -106,7 +106,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -Only sn
 
 Expected: `PASS: 2 test file(s)` with every validation and test process exiting `0` without timeout.
 
-- [ ] **Step 5: Verify the hub entry point and local diff boundary**
+- [x] **Step 5: Verify the hub entry point and local diff boundary**
 
 ```powershell
 & 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe' /ErrorStdOut=UTF-8 /Validate '.\main.ahk'
@@ -116,7 +116,6 @@ git status --short --branch
 
 Expected: `main.ahk` validates, tracked diff is clean, and `config/settings.local.ini` remains untracked/ignored rather than entering a commit.
 
-- [ ] **Step 6: Record completion without committing the local configuration**
+- [x] **Step 6: Record completion without committing the local configuration**
 
 Update this plan's checkboxes and report the exact local entries, focused-test result, and restart instruction. Do not commit `config/settings.local.ini`; the design and plan commits are the only tracked artifacts.
-
