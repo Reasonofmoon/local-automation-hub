@@ -154,6 +154,27 @@ class Win32InputAdapter {
             throw Error("Snippet insertion is blocked for elevated targets")
 
         this.ValidateTargetSnapshot(targetSnapshot, true)
+        if targetSnapshot["controlHandle"] {
+            currentMetadata := ""
+            try currentMetadata := this.ReadCurrentControlMetadata(windowHandle, targetSnapshot["controlHandle"])
+            catch as metadataError {
+                if targetSnapshot["isStandardControl"]
+                    throw Error("Snippet insertion is blocked because the captured standard control metadata is unavailable")
+                return true
+            }
+            ValidateCurrentControlMetadata(
+                targetSnapshot,
+                currentMetadata["controlClass"],
+                currentMetadata["controlStyle"],
+                currentMetadata["styleAvailable"]
+            )
+        } else {
+            ValidateCurrentControlMetadata(
+                targetSnapshot,
+                targetSnapshot["controlClass"],
+                targetSnapshot["controlStyle"]
+            )
+        }
         if targetSnapshot["isStandardControl"] {
             currentControl := ControlGetFocus("ahk_id " windowHandle)
             currentControlHandle := currentControl = "" ? 0 : ControlGetHwnd(currentControl, "ahk_id " windowHandle)
@@ -161,6 +182,22 @@ class Win32InputAdapter {
                 throw Error("Snippet insertion is blocked because focus changed before input")
         }
         return true
+    }
+
+    ReadCurrentControlMetadata(windowHandle, controlHandle) {
+        if !controlHandle
+            throw Error("Snippet insertion target control handle is unavailable")
+        controlTitle := "ahk_id " controlHandle
+        windowTitle := "ahk_id " windowHandle
+        controlClass := ControlGetClassNN(controlTitle, windowTitle)
+        if controlClass = ""
+            throw Error("Snippet insertion target control class is unavailable")
+        controlStyle := 0
+        styleAvailable := true
+        try controlStyle := ControlGetStyle(controlTitle, windowTitle)
+        catch
+            styleAvailable := false
+        return Map("controlClass", controlClass, "controlStyle", controlStyle, "styleAvailable", styleAvailable)
     }
 
     ValidateTargetSnapshot(targetSnapshot, allowCustomControl := false) {
@@ -263,6 +300,34 @@ IsPasswordControl(controlClass, controlStyle) {
     if RegExMatch(String(controlClass), "i)(password|credential)")
         return true
     return (Integer(controlStyle) & 0x20) != 0
+}
+
+ValidateCurrentControlMetadata(targetSnapshot, currentControlClass, currentControlStyle, styleAvailable := true) {
+    if !IsObject(targetSnapshot)
+        throw Error("Snippet insertion target snapshot is invalid")
+    for key in ["controlClass", "controlStyle", "isStandardControl"] {
+        if !targetSnapshot.Has(key)
+            throw Error("Snippet insertion target snapshot is invalid")
+    }
+
+    if RegExMatch(String(currentControlClass), "i)(password|credential)")
+        throw Error("Snippet insertion is blocked for password controls")
+    if styleAvailable && IsPasswordControl(currentControlClass, currentControlStyle)
+        throw Error("Snippet insertion is blocked for password controls")
+    if !targetSnapshot["isStandardControl"]
+        return true
+    if !styleAvailable
+        throw Error("Snippet insertion is blocked because the captured standard control metadata is unavailable")
+    if !IsStandardTextControl(currentControlClass)
+        throw Error("Snippet insertion is blocked because the current control is not the captured standard control")
+
+    expectedClass := StrLower(String(targetSnapshot["controlClass"]))
+    actualClass := StrLower(String(currentControlClass))
+    expectedStyle := Integer(targetSnapshot["controlStyle"])
+    actualStyle := Integer(currentControlStyle)
+    if (expectedClass != actualClass || expectedStyle != actualStyle)
+        throw Error("Snippet insertion is blocked because the captured control metadata changed")
+    return true
 }
 
 IsStandardTextControl(controlClass) {

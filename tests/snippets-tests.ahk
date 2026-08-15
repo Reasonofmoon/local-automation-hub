@@ -15,6 +15,8 @@ class FakeInputAdapter {
         this.isCustomControl := false
         this.captureControlClass := ""
         this.captureControlStyle := 0
+        this.currentControlClass := ""
+        this.currentControlStyle := 0
         this.isTargetElevated := false
         this.isHubElevated := false
         this.targetDestroyed := false
@@ -79,6 +81,8 @@ class FakeInputAdapter {
             throw Error("Snippet insertion is blocked for elevated targets")
         if this.hasFocusDrift && !this.isCustomControl
             throw Error("Snippet insertion is blocked because focus changed before input")
+        currentControlClass := this.currentControlClass = "" ? targetSnapshot["controlClass"] : this.currentControlClass
+        ValidateCurrentControlMetadata(targetSnapshot, currentControlClass, this.currentControlStyle)
         return true
     }
 
@@ -200,12 +204,56 @@ adapter.CaptureBeforePalette()
 AssertThrows(() => service.Insert("multi"), "blocks password controls")
 AssertEqual("before", adapter.ClipboardText(), "does not alter clipboard for password controls")
 
+livePasswordAdapter := FakeInputAdapter("before")
+livePasswordAdapter.captureControlClass := "Edit1"
+livePasswordAdapter.captureControlStyle := 0
+livePasswordAdapter.CaptureBeforePalette()
+livePasswordAdapter.currentControlClass := "Edit1"
+livePasswordAdapter.currentControlStyle := 0x20
+livePasswordService := SnippetService(Map("multi", "line 1`nline 2"), livePasswordAdapter)
+AssertThrows(() => livePasswordService.Insert("multi"), "blocks a captured standard control that becomes password-protected")
+AssertEqual(0, livePasswordAdapter.PasteCount(), "does not paste into a live password metadata drift")
+AssertEqual("", livePasswordAdapter.InsertedText(), "does not leak snippet text after live password metadata drift")
+AssertEqual("before", livePasswordAdapter.ClipboardText(), "restores clipboard after live password metadata drift")
+
+classDriftAdapter := FakeInputAdapter("before")
+classDriftAdapter.captureControlClass := "Edit1"
+classDriftAdapter.CaptureBeforePalette()
+classDriftAdapter.currentControlClass := "Button1"
+classDriftService := SnippetService(Map("multi", "line 1`nline 2"), classDriftAdapter)
+AssertThrows(() => classDriftService.Insert("multi"), "blocks standard control handle reuse with class drift")
+AssertEqual(0, classDriftAdapter.PasteCount(), "does not paste after standard class metadata drift")
+AssertEqual("", classDriftAdapter.InsertedText(), "does not leak snippet text after standard class metadata drift")
+AssertEqual("before", classDriftAdapter.ClipboardText(), "restores clipboard after standard class metadata drift")
+
+styleDriftAdapter := FakeInputAdapter("before")
+styleDriftAdapter.captureControlClass := "Edit1"
+styleDriftAdapter.captureControlStyle := 0
+styleDriftAdapter.CaptureBeforePalette()
+styleDriftAdapter.currentControlClass := "Edit1"
+styleDriftAdapter.currentControlStyle := 0x40
+styleDriftService := SnippetService(Map("multi", "line 1`nline 2"), styleDriftAdapter)
+AssertThrows(() => styleDriftService.Insert("multi"), "blocks standard control handle reuse with style drift")
+AssertEqual(0, styleDriftAdapter.PasteCount(), "does not paste after standard style metadata drift")
+AssertEqual("", styleDriftAdapter.InsertedText(), "does not leak snippet text after standard style metadata drift")
+AssertEqual("before", styleDriftAdapter.ClipboardText(), "restores clipboard after standard style metadata drift")
+
 customAdapter := FakeInputAdapter("before")
 customAdapter.isCustomControl := true
 customAdapter.CaptureBeforePalette()
 customService := SnippetService(Map("multi", "line 1\nline 2"), customAdapter)
 customService.Insert("multi")
 AssertEqual("line 1`nline 2", customAdapter.InsertedText(), "pastes multiline text into custom controls")
+
+liveCredentialCustomAdapter := FakeInputAdapter("before")
+liveCredentialCustomAdapter.isCustomControl := true
+liveCredentialCustomAdapter.CaptureBeforePalette()
+liveCredentialCustomAdapter.currentControlClass := "CredentialInput"
+liveCredentialCustomService := SnippetService(Map("multi", "line 1`nline 2"), liveCredentialCustomAdapter)
+AssertThrows(() => liveCredentialCustomService.Insert("multi"), "blocks a custom control that becomes credential-like")
+AssertEqual(0, liveCredentialCustomAdapter.PasteCount(), "does not paste into a live credential-like custom control")
+AssertEqual("", liveCredentialCustomAdapter.InsertedText(), "does not leak snippet text after live custom credential metadata drift")
+AssertEqual("before", liveCredentialCustomAdapter.ClipboardText(), "restores clipboard after live custom credential metadata drift")
 
 metadataAdapter := Win32InputAdapter()
 safeCustomSnapshot := Map(
